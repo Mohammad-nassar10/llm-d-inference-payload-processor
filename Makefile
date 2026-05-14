@@ -1,3 +1,8 @@
+LOCALBIN ?= $(shell pwd)/bin
+
+# Code generation targets are defined in Makefile.gen.mk
+include Makefile.gen.mk
+
 # Project configuration
 PROJECT_NAME ?= llm-d-inference-payload-processor
 REGISTRY ?= ghcr.io/llm-d
@@ -51,11 +56,7 @@ lint-go: ## Run Go linter (golangci-lint v2)
 .PHONY: fmt
 fmt: ## Format Go code
 	gofmt -w .
-
-.PHONY: generate
-generate: ## Run go generate
-	go generate ./...
-
+	
 .PHONY: vet
 vet: ## Run go vet
 	go vet ./...
