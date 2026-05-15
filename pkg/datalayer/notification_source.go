@@ -39,6 +39,7 @@ var _ framework.NotificationSource = &notificationSource{}
 
 type notificationSource struct {
 	name       framework.TypedName
+	ds         framework.DataStore
 	ch         chan framework.Event
 	extractors []framework.Extractor
 
@@ -49,7 +50,7 @@ type notificationSource struct {
 
 // NotificationSourceFactory is the factory function for NotificationSource.
 func NotificationSourceFactory(name string, _ json.RawMessage, _ framework.Handle) (framework.Plugin, error) {
-	src, err := NewNotificationSource(name)
+	src, err := NewNotificationSource(name, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create '%s' plugin - %w", NotificationSourcePluginType, err)
 	}
@@ -57,13 +58,14 @@ func NotificationSourceFactory(name string, _ json.RawMessage, _ framework.Handl
 }
 
 // NewNotificationSource creates a NotificationSource that delivers each event
-// to the given extractors as it arrives.
-func NewNotificationSource(name string, extractors ...framework.Extractor) (framework.NotificationSource, error) {
+// to the given extractors as it arrives. ds is passed to each extractor on every Extract call.
+func NewNotificationSource(name string, ds framework.DataStore, extractors ...framework.Extractor) (framework.NotificationSource, error) {
 	if name == "" {
 		return nil, fmt.Errorf("name is required for plugin '%s'", NotificationSourcePluginType)
 	}
 	return &notificationSource{
 		name:       framework.TypedName{Type: NotificationSourcePluginType, Name: name},
+		ds:         ds,
 		ch:         make(chan framework.Event, defaultBufferSize),
 		extractors: extractors,
 		done:       make(chan struct{}),
@@ -118,7 +120,7 @@ func (n *notificationSource) eventLoop(ctx context.Context, ready chan struct{})
 			// Extractors are called sequentially; current extractors are in-memory only.
 			// Switch to a WaitGroup if any extractor performs I/O.
 			for _, ext := range n.extractors {
-				if err := ext.Extract(ctx, []framework.Event{e}); err != nil {
+				if err := ext.Extract(ctx, n.ds, []framework.Event{e}); err != nil {
 					logger.Error(err, "extractor error", "extractor", ext.TypedName())
 				}
 			}
