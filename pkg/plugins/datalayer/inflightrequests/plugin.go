@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package datalayer
+package inflightrequests
 
 import (
 	"context"
@@ -25,26 +25,35 @@ import (
 	"github.com/llm-d/llm-d-inference-payload-processor/pkg/framework"
 )
 
-const RunningRequestsExtractorPluginType = "running-requests-extractor"
+const (
+	// PluginType is the identifier used when registering this extractor.
+	PluginType = "inflight-requests-extractor"
+
+	// InflightRequestsAttributeKey is the attribute key written to each model's attribute store.
+	InflightRequestsAttributeKey = "inflight-requests"
+)
 
 // compile-time interface assertion
-var _ framework.Extractor = &RunningRequestsExtractor{}
+var _ framework.Extractor = &InflightRequestsExtractor{}
 
-// RunningRequestsExtractorFactory is the factory function for RunningRequestsExtractor.
-func RunningRequestsExtractorFactory(name string, _ json.RawMessage, _ framework.Handle) (framework.Plugin, error) {
-	return NewRunningRequestsExtractor().WithName(name), nil
+// Factory creates a InflightRequestsExtractor with a nil DataStore.
+// The factory path is limited: the DataStore is not available via framework.Handle,
+// so the created extractor cannot write to the store. Use NewInflightRequestsExtractor
+// directly when constructing for production use.
+func Factory(name string, _ json.RawMessage, _ framework.Handle) (framework.Plugin, error) {
+	return NewInflightRequestsExtractor(nil).WithName(name), nil
 }
 
-// RunningRequestsCount holds in-flight request and token counts for one model.
-type RunningRequestsCount struct {
+// InflightRequestsCount holds in-flight request and token counts for one model.
+type InflightRequestsCount struct {
 	Requests int64
 	Tokens   int64
 }
 
-func (r RunningRequestsCount) Clone() fwdatalayer.Cloneable { return r }
+func (r InflightRequestsCount) Clone() fwdatalayer.Cloneable { return r }
 
-// RunningRequestsExtractor tracks in-flight request counts and token sums per model.
-// It writes RunningRequestsCount to each model's "running-requests" attribute.
+// InflightRequestsExtractor tracks in-flight request counts and token sums per model.
+// It writes InflightRequestsCount to each model's InflightRequestsAttributeKey attribute.
 //
 // Extract is assumed to be called from a single goroutine (the NotificationSource event loop).
 // If parallel dispatch is introduced, add a sync.Mutex around counters and the DataStore write.
@@ -52,28 +61,30 @@ func (r RunningRequestsCount) Clone() fwdatalayer.Cloneable { return r }
 // TODO: counters leak if a request fails without a corresponding ResponseEventType (e.g. connection
 // drop, upstream error, context cancellation). The call site should fire a
 // synthetic ResponseEventType in its error/EOF path to keep counts accurate.
-type RunningRequestsExtractor struct {
-	name     framework.TypedName
-	counters map[string]RunningRequestsCount
+type InflightRequestsExtractor struct {
+	name      framework.TypedName
+	dataStore framework.DataStore
+	counters  map[string]InflightRequestsCount
 }
 
-func NewRunningRequestsExtractor() *RunningRequestsExtractor {
-	return &RunningRequestsExtractor{
-		name:     framework.TypedName{Type: RunningRequestsExtractorPluginType, Name: RunningRequestsExtractorPluginType},
-		counters: make(map[string]RunningRequestsCount),
+func NewInflightRequestsExtractor(ds framework.DataStore) *InflightRequestsExtractor {
+	return &InflightRequestsExtractor{
+		name:      framework.TypedName{Type: PluginType, Name: PluginType},
+		dataStore: ds,
+		counters:  make(map[string]InflightRequestsCount),
 	}
 }
 
-func (e *RunningRequestsExtractor) TypedName() framework.TypedName { return e.name }
+func (e *InflightRequestsExtractor) TypedName() framework.TypedName { return e.name }
 
 // WithName sets the instance name, used by the factory when the plugin is configured by name.
-func (e *RunningRequestsExtractor) WithName(name string) *RunningRequestsExtractor {
+func (e *InflightRequestsExtractor) WithName(name string) *InflightRequestsExtractor {
 	e.name.Name = name
 	return e
 }
 
-func (e *RunningRequestsExtractor) Extract(_ context.Context, ds framework.DataStore, events []framework.Event) error {
-	updated := map[string]RunningRequestsCount{}
+func (e *InflightRequestsExtractor) Extract(_ context.Context, events []framework.Event) error {
+	updated := map[string]InflightRequestsCount{}
 
 	for _, ev := range events {
 		switch ev.Type {
@@ -112,7 +123,7 @@ func (e *RunningRequestsExtractor) Extract(_ context.Context, ds framework.DataS
 	}
 
 	for model, c := range updated {
-		ds.GetOrCreateModel(model).GetAttributes().Put("running-requests", c)
+		e.dataStore.GetOrCreateModel(model).GetAttributes().Put(InflightRequestsAttributeKey, c)
 	}
 	return nil
 }

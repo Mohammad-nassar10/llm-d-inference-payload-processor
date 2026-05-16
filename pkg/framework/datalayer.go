@@ -80,5 +80,5 @@ type NotificationSource interface {
 // Extractor processes a batch of Events. It does not manage its own goroutines.
 type Extractor interface {
 	Plugin
-	Extract(ctx context.Context, ds DataStore, events []Event) error
+	Extract(ctx context.Context, events []Event) error
 }
