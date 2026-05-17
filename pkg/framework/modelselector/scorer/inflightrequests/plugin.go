@@ -37,7 +37,7 @@ var _ modelselector.Scorer = &InflightRequestsScorer{}
 // Models without an inflight-requests attribute are treated as idle (0 requests).
 // If all models have the same count, all score 1.0.
 type InflightRequestsScorer struct {
-	name framework.TypedName
+	typedName framework.TypedName
 }
 
 // Factory is the factory function for InflightRequestsScorer.
@@ -48,16 +48,16 @@ func Factory(name string, _ json.RawMessage, _ framework.Handle) (framework.Plug
 // NewInflightRequestsScorer initializes a new InflightRequestsScorer and returns its pointer.
 func NewInflightRequestsScorer() *InflightRequestsScorer {
 	return &InflightRequestsScorer{
-		name: framework.TypedName{Type: PluginType, Name: PluginType},
+		typedName: framework.TypedName{Type: PluginType, Name: PluginType},
 	}
 }
 
 // TypedName returns the type and name tuple of this plugin instance.
-func (s *InflightRequestsScorer) TypedName() framework.TypedName { return s.name }
+func (s *InflightRequestsScorer) TypedName() framework.TypedName { return s.typedName }
 
 // WithName sets the instance name.
 func (s *InflightRequestsScorer) WithName(name string) *InflightRequestsScorer {
-	s.name.Name = name
+	s.typedName.Name = name
 	return s
 }
 
