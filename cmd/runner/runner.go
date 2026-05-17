@@ -38,8 +38,8 @@ import (
 	logutil "github.com/llm-d/llm-d-inference-payload-processor/pkg/common/observability/logging"
 	"github.com/llm-d/llm-d-inference-payload-processor/pkg/common/observability/profiling"
 	"github.com/llm-d/llm-d-inference-payload-processor/pkg/common/observability/tracing"
-	"github.com/llm-d/llm-d-inference-payload-processor/pkg/datastore"
 	"github.com/llm-d/llm-d-inference-payload-processor/pkg/datalayer"
+	"github.com/llm-d/llm-d-inference-payload-processor/pkg/datastore"
 	"github.com/llm-d/llm-d-inference-payload-processor/pkg/framework"
 	"github.com/llm-d/llm-d-inference-payload-processor/pkg/metrics"
 	"github.com/llm-d/llm-d-inference-payload-processor/pkg/plugins/basemodelextractor"
@@ -225,7 +225,7 @@ func (r *Runner) Run(ctx context.Context) error {
 	}
 
 	// Wire the inflight-requests data pipeline: extractor → notification source.
-    // TODO: config-driven path does not yet support NotificationSource + extractors.
+	// TODO: config-driven path does not yet support NotificationSource + extractors.
 	notifSrc, err := datalayer.NewNotificationSource("default", inflightrequests.NewInflightRequestsExtractor(ds))
 	if err != nil {
 		setupLog.Error(err, "failed to create notification source")
