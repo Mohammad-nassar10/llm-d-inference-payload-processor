@@ -226,7 +226,7 @@ func (r *Runner) Run(ctx context.Context) error {
 
 	// Wire the inflight-requests data pipeline: extractor → notification source.
 	// TODO: config-driven path does not yet support NotificationSource + extractors.
-	notifSrc, err := datalayer.NewNotificationSource("default", inflightrequests.NewInflightRequestsExtractor(ds))
+	notifSrc, err := notificationsource.New("default", inflightrequests.NewInflightRequestsExtractor(ds))
 	if err != nil {
 		setupLog.Error(err, "failed to create notification source")
 		return err
