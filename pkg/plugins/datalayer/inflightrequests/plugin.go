@@ -35,11 +35,11 @@ const (
 // compile-time interface assertion
 var _ datalayer.Extractor = &InflightRequestsExtractor{}
 
-// Factory creates a InflightRequestsExtractor with a nil DataStore.
+// ExtractorFactory creates a InflightRequestsExtractor with a nil DataStore.
 // The factory path is limited: the DataStore is not available via framework.Handle,
 // so the created extractor cannot write to the store. Use NewInflightRequestsExtractor
 // directly when constructing for production use.
-func Factory(name string, _ json.RawMessage, _ framework.Handle) (framework.Plugin, error) {
+func ExtractorFactory(name string, _ json.RawMessage, _ framework.Handle) (framework.Plugin, error) {
 	return NewInflightRequestsExtractor(nil).WithName(name), nil
 }
 
