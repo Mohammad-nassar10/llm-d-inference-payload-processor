@@ -40,8 +40,8 @@ type InflightRequestsScorer struct {
 	typedName framework.TypedName
 }
 
-// Factory is the factory function for InflightRequestsScorer.
-func Factory(name string, _ json.RawMessage, _ framework.Handle) (framework.Plugin, error) {
+// ScorerFactory is the factory function for InflightRequestsScorer.
+func ScorerFactory(name string, _ json.RawMessage, _ framework.Handle) (framework.Plugin, error) {
 	return NewInflightRequestsScorer().WithName(name), nil
 }
 
