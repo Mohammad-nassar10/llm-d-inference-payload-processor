@@ -269,7 +269,7 @@ func (r *Runner) Run(ctx context.Context) error {
 func (r *Runner) registerInTreePlugins() {
 	framework.Register(bodyfieldtoheader.BodyFieldToHeaderPluginType, bodyfieldtoheader.BodyFieldToHeaderPluginFactory)
 	framework.Register(basemodelextractor.BaseModelToHeaderPluginType, basemodelextractor.BaseModelToHeaderPluginFactory)
-	framework.Register(inflightrequests.PluginType, inflightrequests.Factory)
+	framework.Register(inflightrequests.PluginType, inflightrequests.ExtractorFactory)
 	framework.Register(notificationsource.PluginType, notificationsource.Factory)
 }
 
