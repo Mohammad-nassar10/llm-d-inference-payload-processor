@@ -180,6 +180,11 @@ func (r *Runner) Run(ctx context.Context) error {
 
 	ds := datastore.NewStore()
 
+	// Pre-seed the datastore with any models provided via --list-models.
+	for _, name := range opts.ListModels {
+		ds.GetOrCreateModel(name)
+	}
+
 	// Register factories for all known in-tree plugins
 	r.registerInTreePlugins()
 

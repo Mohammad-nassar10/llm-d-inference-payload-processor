@@ -50,6 +50,7 @@ type Options struct {
 	// Plugins.
 	//
 	PluginSpecs config.IPPPluginSpecs // Repeatable --plugin <type>:<name>[:<json>] flag values.
+	ListModels  []string              // Model names to pre-seed into the datastore at startup.
 
 	// internal
 	fs *pflag.FlagSet // FlagSet used in AddFlags()
@@ -92,6 +93,8 @@ func (opts *Options) AddFlags(fs *pflag.FlagSet) {
 		"Enables pprof handlers. Defaults to true. Set to false to disable pprof handlers.")
 
 	fs.Var(&opts.PluginSpecs, "plugin", `Repeatable. --plugin <type>:<name>[:<json>]`)
+	fs.StringArrayVar(&opts.ListModels, "list-models", nil,
+		"Repeatable. Pre-seed model names into the datastore at startup. --list-models modelA --list-models modelB")
 
 	opts.LoggingOptions.AddFlags(fs) // Add logging flags.
 }

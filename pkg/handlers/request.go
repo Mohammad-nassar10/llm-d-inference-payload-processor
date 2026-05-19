@@ -67,20 +67,21 @@ func (s *Server) HandleRequestBody(ctx context.Context, reqCtx *RequestContext, 
 		return nil, errcommon.Error{Code: errcommon.BadRequest, Msg: fmt.Sprintf("failed to parse request body: %v", err)}
 	}
 
-	if err := s.runRequestPlugins(ctx, reqCtx.CycleState, reqCtx.Request); err != nil {
-		return nil, err
-	}
-
-	// Model selection: pick the best candidate and write it to the routing header.
+	// Model selection runs before plugins so that bodyfieldtoheader (and any
+	// other plugin) sees the already-resolved model name in the body.
 	if s.modelSelector != nil && s.candidateModels != nil {
 		if candidates := s.candidateModels(); len(candidates) > 0 {
 			result, selErr := s.modelSelector.Run(ctx, reqCtx.Request, reqCtx.CycleState, candidates)
 			if selErr != nil {
 				log.FromContext(ctx).V(logutil.DEFAULT).Error(selErr, "model selection failed, proceeding without selected model")
 			} else if result != nil && result.TargetModel != nil {
-				reqCtx.Request.SetHeader(selectedModelHeader, result.TargetModel.GetName())
+				reqCtx.Request.SetBodyField("model", result.TargetModel.GetName())
 			}
 		}
+	}
+
+	if err := s.runRequestPlugins(ctx, reqCtx.CycleState, reqCtx.Request); err != nil {
+		return nil, err
 	}
 
 	// Notify the data layer of the incoming request.
