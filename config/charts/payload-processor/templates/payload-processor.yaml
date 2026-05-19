@@ -23,6 +23,9 @@ spec:
         {{- range $key, $value := .Values.payloadProcessor.flags }}
         - --{{ $key }}={{ $value }}
         {{- end }}      
+        {{- range .Values.payloadProcessor.listModels }}
+        - --list-models={{ . }}
+        {{- end }}
         {{- range .Values.payloadProcessor.plugins }}
         - --plugin
         {{- if .json }}

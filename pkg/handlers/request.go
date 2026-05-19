@@ -32,6 +32,7 @@ import (
 	"github.com/llm-d/llm-d-inference-payload-processor/pkg/framework"
 	"github.com/llm-d/llm-d-inference-payload-processor/pkg/framework/datalayer"
 	"github.com/llm-d/llm-d-inference-payload-processor/pkg/metrics"
+	"github.com/llm-d/llm-d-inference-payload-processor/pkg/plugins/basemodelextractor"
 )
 
 // HandleRequestHeaders extracts request headers into reqCtx and returns
@@ -75,7 +76,9 @@ func (s *Server) HandleRequestBody(ctx context.Context, reqCtx *RequestContext, 
 			if selErr != nil {
 				log.FromContext(ctx).V(logutil.DEFAULT).Error(selErr, "model selection failed, proceeding without selected model")
 			} else if result != nil && result.TargetModel != nil {
-				reqCtx.Request.SetBodyField("model", result.TargetModel.GetName())
+				selectedModel := result.TargetModel.GetName()
+				reqCtx.Request.SetBodyField("model", selectedModel)
+				reqCtx.Request.SetHeader(basemodelextractor.BaseModelHeader, selectedModel)
 			}
 		}
 	}
