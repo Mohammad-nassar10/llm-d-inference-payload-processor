@@ -76,7 +76,12 @@ func (s *Server) HandleRequestBody(ctx context.Context, reqCtx *RequestContext, 
 			if selErr != nil {
 				log.FromContext(ctx).V(logutil.DEFAULT).Error(selErr, "model selection failed, proceeding without selected model")
 			} else if result != nil && result.TargetModel != nil {
+				originalModel, _ := reqCtx.Request.Body["model"].(string)
 				selectedModel := result.TargetModel.GetName()
+				if originalModel != selectedModel {
+					log.FromContext(ctx).V(logutil.DEFAULT).Info("model selector redirected request",
+						"original", originalModel, "selected", selectedModel)
+				}
 				reqCtx.Request.SetBodyField("model", selectedModel)
 				reqCtx.Request.SetHeader(basemodelextractor.BaseModelHeader, selectedModel)
 			}

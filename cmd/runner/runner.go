@@ -113,7 +113,7 @@ func (r *Runner) Run(ctx context.Context) error {
 	// Print all flag values.
 	flags := make(map[string]any)
 	pflag.VisitAll(func(f *pflag.Flag) {
-		flags[f.Name] = f.Value
+		flags[f.Name] = f.Value.String()
 	})
 
 	if opts.Tracing {
@@ -184,6 +184,7 @@ func (r *Runner) Run(ctx context.Context) error {
 	for _, name := range opts.ListModels {
 		ds.GetOrCreateModel(name)
 	}
+	setupLog.Info("datastore pre-seeded", "models", opts.ListModels)
 
 	// Register factories for all known in-tree plugins
 	r.registerInTreePlugins()
