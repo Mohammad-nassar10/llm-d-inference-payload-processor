@@ -85,6 +85,10 @@ type RequestContext struct {
 	CycleState                *framework.CycleState
 	Request                   *framework.InferenceRequest
 	Response                  *framework.InferenceResponse
+	// ResponseHeadersDeferred is true when HandleResponseHeaders returned nil (deferred the
+	// ResponseHeaders ext-proc response to be sent from the body processing phase).
+	// Used to gate whether body handlers should include a ResponseHeaders response.
+	ResponseHeadersDeferred bool
 }
 
 func (s *Server) Process(srv extProcPb.ExternalProcessor_ProcessServer) error {

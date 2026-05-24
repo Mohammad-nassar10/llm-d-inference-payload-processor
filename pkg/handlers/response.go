@@ -44,6 +44,7 @@ func (s *Server) HandleResponseHeaders(ctx context.Context, reqCtx *RequestConte
 
 	if !headers.GetEndOfStream() {
 		log.FromContext(ctx).V(logutil.VERBOSE).Info("captured response headers, deferring response until body arrives...")
+		reqCtx.ResponseHeadersDeferred = true
 		return nil
 	}
 	// EndOfStream means no body is expected, return HeadersResponse immediately
@@ -74,12 +75,12 @@ func (s *Server) HandleResponseBody(ctx context.Context, reqCtx *RequestContext,
 
 	logger := log.FromContext(ctx)
 	if len(s.responsePlugins) == 0 {
-		return s.generateEmptyResponseBodyResponse(responseBodyBytes), nil
+		return s.generateEmptyResponseBodyResponse(reqCtx, responseBodyBytes), nil
 	}
 
 	if err := json.Unmarshal(responseBodyBytes, &reqCtx.Response.Body); err != nil {
 		logger.Error(err, "Failed to parse response body as JSON, skipping response plugins")
-		return s.generateEmptyResponseBodyResponse(responseBodyBytes), nil
+		return s.generateEmptyResponseBodyResponse(reqCtx, responseBodyBytes), nil
 	}
 
 	if err := s.runResponsePlugins(ctx, reqCtx.CycleState, reqCtx.Response); err != nil {
@@ -119,18 +120,21 @@ func (s *Server) HandleResponseBody(ctx context.Context, reqCtx *RequestContext,
 	return ret, nil
 }
 
-// generateEmptyResponseBodyResponse builds a streaming response with an empty
-// ResponseHeaders followed by chunked body responses via AddStreamedResponseBody.
-func (s *Server) generateEmptyResponseBodyResponse(responseBodyBytes []byte) []*eppb.ProcessingResponse {
-	responses := []*eppb.ProcessingResponse{
-		{
+// generateEmptyResponseBodyResponse builds a pass-through body response.
+// It only prepends a ResponseHeaders response when headers processing was deferred
+// (reqCtx.ResponseHeadersDeferred=true), i.e. when responseHeaders mode is SEND and
+// HandleResponseHeaders returned nil waiting for the body. Sending ResponseHeaders when
+// Envoy never requested it (SKIP mode) corrupts chunked transfer encoding.
+func (s *Server) generateEmptyResponseBodyResponse(reqCtx *RequestContext, responseBodyBytes []byte) []*eppb.ProcessingResponse {
+	var responses []*eppb.ProcessingResponse
+	if reqCtx.ResponseHeadersDeferred {
+		responses = append(responses, &eppb.ProcessingResponse{
 			Response: &eppb.ProcessingResponse_ResponseHeaders{
 				ResponseHeaders: &eppb.HeadersResponse{},
 			},
-		},
+		})
 	}
-	responses = envoy.AddStreamedResponseBody(responses, responseBodyBytes)
-	return responses
+	return envoy.AddStreamedResponseBody(responses, responseBodyBytes)
 }
 
 // HandleResponseTrailers handles response trailers.

@@ -193,6 +193,9 @@ func (p *ModelSelectorProfile) runScorerPlugins(ctx context.Context, request *fr
 		}
 		logger.V(logutil.DEBUG).Info("Completed running scorer plugin", "plugin", scorer.TypedName())
 	}
+	for _, sm := range scoredModels {
+		logger.V(logutil.VERBOSE).Info("weighted score", "model", sm.Model.GetName(), "score", sm.Score)
+	}
 	logger.V(logutil.VERBOSE).Info("Completed running scorer plugins")
 
 	return scoredModels

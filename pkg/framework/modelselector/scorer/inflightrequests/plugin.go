@@ -21,6 +21,9 @@ import (
 	"encoding/json"
 	"math"
 
+	"sigs.k8s.io/controller-runtime/pkg/log"
+
+	logutil "github.com/llm-d/llm-d-inference-payload-processor/pkg/common/observability/logging"
 	"github.com/llm-d/llm-d-inference-payload-processor/pkg/framework"
 	"github.com/llm-d/llm-d-inference-payload-processor/pkg/framework/datalayer"
 	"github.com/llm-d/llm-d-inference-payload-processor/pkg/framework/modelselector"
@@ -63,7 +66,7 @@ func (s *InflightRequestsScorer) WithName(name string) *InflightRequestsScorer {
 
 // Score returns a score in [0,1] for each model based on its in-flight request count.
 // Formula: score = (max - count) / (max - min)
-func (s *InflightRequestsScorer) Score(_ context.Context, _ *framework.CycleState, _ *framework.InferenceRequest, models []datalayer.Model) map[datalayer.Model]float64 {
+func (s *InflightRequestsScorer) Score(ctx context.Context, _ *framework.CycleState, _ *framework.InferenceRequest, models []datalayer.Model) map[datalayer.Model]float64 {
 	var minCount int64 = math.MaxInt64
 	var maxCount int64 = math.MinInt64
 
@@ -86,6 +89,15 @@ func (s *InflightRequestsScorer) Score(_ context.Context, _ *framework.CycleStat
 		} else {
 			scores[model] = float64(maxCount-requestCounts[model]) / float64(maxCount-minCount)
 		}
+	}
+
+	logger := log.FromContext(ctx)
+	for _, model := range models {
+		logger.V(logutil.VERBOSE).Info("inflight-requests score",
+			"model", model.GetName(),
+			"inflightRequests", requestCounts[model],
+			"score", scores[model],
+		)
 	}
 	return scores
 }
