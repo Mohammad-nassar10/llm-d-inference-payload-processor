@@ -29,8 +29,8 @@ import (
 	envoy "github.com/llm-d/llm-d-inference-payload-processor/pkg/common/envoy"
 	errcommon "github.com/llm-d/llm-d-inference-payload-processor/pkg/common/error"
 	logutil "github.com/llm-d/llm-d-inference-payload-processor/pkg/common/observability/logging"
-	"github.com/llm-d/llm-d-inference-payload-processor/pkg/framework"
-	"github.com/llm-d/llm-d-inference-payload-processor/pkg/framework/datalayer"
+	"github.com/llm-d/llm-d-inference-payload-processor/pkg/framework/interface/plugin"
+	"github.com/llm-d/llm-d-inference-payload-processor/pkg/framework/interface/requesthandling"
 	"github.com/llm-d/llm-d-inference-payload-processor/pkg/metrics"
 	"github.com/llm-d/llm-d-inference-payload-processor/pkg/plugins/basemodelextractor"
 )
@@ -138,15 +138,24 @@ func (s *Server) HandleRequestBody(ctx context.Context, reqCtx *RequestContext, 
 }
 
 // runRequestPlugins executes request plugins in the order they were registered.
-func (s *Server) runRequestPlugins(ctx context.Context, cycleState *framework.CycleState, request *framework.InferenceRequest) error {
+func (s *Server) runRequestPlugins(ctx context.Context, cycleState *plugin.CycleState, request *requesthandling.InferenceRequest) error {
+	logger := log.FromContext(ctx).V(logutil.DEFAULT)
+
+	// Cache verbose logger and check Enabled() once to avoid per-iteration
+	// allocations from argument boxing when logging at that level is disabled.
+	verboseLogger := logger.V(logutil.VERBOSE)
+	verboseEnabled := verboseLogger.Enabled()
+
 	var err error
 	for _, plugin := range s.requestPlugins {
-		log.FromContext(ctx).V(logutil.VERBOSE).Info("Executing request plugin", "plugin", plugin.TypedName())
+		if verboseEnabled {
+			verboseLogger.Info("Executing request plugin", "plugin", plugin.TypedName())
+		}
 		before := time.Now()
 		err = plugin.ProcessRequest(ctx, cycleState, request)
 		metrics.RecordPluginProcessingLatency(requestPluginExtensionPoint, plugin.TypedName().Type, plugin.TypedName().Name, time.Since(before))
 		if err != nil {
-			log.FromContext(ctx).V(logutil.DEFAULT).Error(err, "Failed to execute request plugin", "plugin", plugin.TypedName())
+			logger.Error(err, "Failed to execute request plugin", "plugin", plugin.TypedName())
 			return err
 		}
 	}

@@ -33,9 +33,9 @@ import (
 	envoy "github.com/llm-d/llm-d-inference-payload-processor/pkg/common/envoy"
 	errcommon "github.com/llm-d/llm-d-inference-payload-processor/pkg/common/error"
 	logutil "github.com/llm-d/llm-d-inference-payload-processor/pkg/common/observability/logging"
-	"github.com/llm-d/llm-d-inference-payload-processor/pkg/framework"
-	"github.com/llm-d/llm-d-inference-payload-processor/pkg/framework/datalayer"
 	fwmodelselector "github.com/llm-d/llm-d-inference-payload-processor/pkg/framework/modelselector"
+	"github.com/llm-d/llm-d-inference-payload-processor/pkg/framework/interface/plugin"
+	"github.com/llm-d/llm-d-inference-payload-processor/pkg/framework/interface/requesthandling"
 	"github.com/llm-d/llm-d-inference-payload-processor/version"
 )
 
@@ -48,7 +48,7 @@ const (
 	responsePluginExtensionPoint = "response"
 )
 
-func NewServer(requestPlugins []framework.RequestProcessor, responsePlugins []framework.ResponseProcessor) *Server {
+func NewServer(requestPlugins []requesthandling.RequestProcessor, responsePlugins []requesthandling.ResponseProcessor) *Server {
 	return &Server{
 		requestPlugins:  requestPlugins,
 		responsePlugins: responsePlugins,
@@ -71,8 +71,8 @@ func (s *Server) WithEventNotifier(n datalayer.EventNotifier) *Server {
 // Server implements the Envoy external processing server.
 // https://www.envoyproxy.io/docs/envoy/latest/api-v3/service/ext_proc/v3/external_processor.proto
 type Server struct {
-	requestPlugins  []framework.RequestProcessor
-	responsePlugins []framework.ResponseProcessor
+	requestPlugins  []requesthandling.RequestProcessor
+	responsePlugins []requesthandling.ResponseProcessor
 	modelSelector   fwmodelselector.ModelSelectorProfile
 	candidateModels func() []datalayer.Model
 	eventNotifier   datalayer.EventNotifier
@@ -82,9 +82,9 @@ type Server struct {
 type RequestContext struct {
 	RequestReceivedTimestamp  time.Time
 	ResponseCompleteTimestamp time.Time
-	CycleState                *framework.CycleState
-	Request                   *framework.InferenceRequest
-	Response                  *framework.InferenceResponse
+	CycleState                *plugin.CycleState
+	Request                   *requesthandling.InferenceRequest
+	Response                  *requesthandling.InferenceResponse
 	// ResponseHeadersDeferred is true when HandleResponseHeaders returned nil (deferred the
 	// ResponseHeaders ext-proc response to be sent from the body processing phase).
 	// Used to gate whether body handlers should include a ResponseHeaders response.
@@ -110,9 +110,9 @@ func (s *Server) Process(srv extProcPb.ExternalProcessor_ProcessServer) error {
 	loggerVerbose.Info("Processing")
 
 	reqCtx := &RequestContext{
-		Request:    framework.NewInferenceRequest(),
-		Response:   framework.NewInferenceResponse(),
-		CycleState: framework.NewCycleState(),
+		Request:    requesthandling.NewInferenceRequest(),
+		Response:   requesthandling.NewInferenceResponse(),
+		CycleState: plugin.NewCycleState(),
 	}
 	// TODO set a max cap on these.
 	// both requestBody and responseBody accumulate without an upper bound.

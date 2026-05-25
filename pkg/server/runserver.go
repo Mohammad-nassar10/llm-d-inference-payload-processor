@@ -32,6 +32,7 @@ import (
 	"github.com/llm-d/llm-d-inference-payload-processor/pkg/framework"
 	"github.com/llm-d/llm-d-inference-payload-processor/pkg/framework/datalayer"
 	fwmodelselector "github.com/llm-d/llm-d-inference-payload-processor/pkg/framework/modelselector"
+	"github.com/llm-d/llm-d-inference-payload-processor/pkg/framework/interface/requesthandling"
 	"github.com/llm-d/llm-d-inference-payload-processor/pkg/handlers"
 )
 
@@ -39,8 +40,8 @@ import (
 type ExtProcServerRunner struct {
 	GrpcPort        int
 	SecureServing   bool
-	RequestPlugins  []framework.RequestProcessor
-	ResponsePlugins []framework.ResponseProcessor
+	RequestPlugins  []requesthandling.RequestProcessor
+	ResponsePlugins []requesthandling.ResponseProcessor
 	ModelSelector   fwmodelselector.ModelSelectorProfile
 	CandidateModels func() []datalayer.Model
 	EventNotifier   datalayer.EventNotifier
