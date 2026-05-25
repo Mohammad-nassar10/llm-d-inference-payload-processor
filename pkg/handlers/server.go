@@ -33,7 +33,9 @@ import (
 	envoy "github.com/llm-d/llm-d-inference-payload-processor/pkg/common/envoy"
 	errcommon "github.com/llm-d/llm-d-inference-payload-processor/pkg/common/error"
 	logutil "github.com/llm-d/llm-d-inference-payload-processor/pkg/common/observability/logging"
-	fwmodelselector "github.com/llm-d/llm-d-inference-payload-processor/pkg/framework/modelselector"
+	"github.com/llm-d/llm-d-inference-payload-processor/pkg/framework/interface/datalayer"
+	datasource "github.com/llm-d/llm-d-inference-payload-processor/pkg/framework/interface/datalayer/datasource"
+	fwmodelselector "github.com/llm-d/llm-d-inference-payload-processor/pkg/framework/interface/modelselector"
 	"github.com/llm-d/llm-d-inference-payload-processor/pkg/framework/interface/plugin"
 	"github.com/llm-d/llm-d-inference-payload-processor/pkg/framework/interface/requesthandling"
 	"github.com/llm-d/llm-d-inference-payload-processor/version"
@@ -63,7 +65,7 @@ func (s *Server) WithModelSelector(ms fwmodelselector.ModelSelectorProfile, cand
 }
 
 // WithEventNotifier sets the event notifier used to feed the data layer.
-func (s *Server) WithEventNotifier(n datalayer.EventNotifier) *Server {
+func (s *Server) WithEventNotifier(n datasource.EventNotifier) *Server {
 	s.eventNotifier = n
 	return s
 }
@@ -75,7 +77,7 @@ type Server struct {
 	responsePlugins []requesthandling.ResponseProcessor
 	modelSelector   fwmodelselector.ModelSelectorProfile
 	candidateModels func() []datalayer.Model
-	eventNotifier   datalayer.EventNotifier
+	eventNotifier   datasource.EventNotifier
 }
 
 // RequestContext stores context information during the lifetime of an HTTP request.

@@ -22,23 +22,24 @@ import (
 
 	eppb "github.com/envoyproxy/go-control-plane/envoy/service/ext_proc/v3"
 
-	"github.com/llm-d/llm-d-inference-payload-processor/pkg/datastore"
-	"github.com/llm-d/llm-d-inference-payload-processor/pkg/framework"
-	"github.com/llm-d/llm-d-inference-payload-processor/pkg/framework/datalayer"
-	"github.com/llm-d/llm-d-inference-payload-processor/pkg/plugins/bodyfieldtoheader"
-	inflightscorer "github.com/llm-d/llm-d-inference-payload-processor/pkg/framework/modelselector/scorer/inflightrequests"
+	"github.com/llm-d/llm-d-inference-payload-processor/pkg/datastore/inmemory"
+	"github.com/llm-d/llm-d-inference-payload-processor/pkg/framework/interface/datalayer"
+	"github.com/llm-d/llm-d-inference-payload-processor/pkg/framework/interface/plugin"
+	"github.com/llm-d/llm-d-inference-payload-processor/pkg/framework/interface/requesthandling"
+	inflightscorer "github.com/llm-d/llm-d-inference-payload-processor/pkg/framework/plugins/modelselector/scorer/inflightrequests"
+	notificationsource "github.com/llm-d/llm-d-inference-payload-processor/pkg/framework/plugins/datalayer/notificationsource"
+	requestmetadata "github.com/llm-d/llm-d-inference-payload-processor/pkg/framework/plugins/datalayer/requestmetadata"
+	"github.com/llm-d/llm-d-inference-payload-processor/pkg/framework/plugins/modelselector/picker/maxscore"
+	"github.com/llm-d/llm-d-inference-payload-processor/pkg/framework/plugins/requesthandling/bodyfieldtoheader"
 	modelselectorsvc "github.com/llm-d/llm-d-inference-payload-processor/pkg/modelselector"
-	"github.com/llm-d/llm-d-inference-payload-processor/pkg/modelselector/picker/maxscore"
-	inflightrequests "github.com/llm-d/llm-d-inference-payload-processor/pkg/plugins/datalayer/inflightrequests"
-	notificationsource "github.com/llm-d/llm-d-inference-payload-processor/pkg/plugins/datalayer/notificationsource"
 )
 
 // newModelSelectorServer builds a Server wired with inflight-requests scorer + max-score picker.
 // It returns the server and a datastore that tests can pre-populate.
-func newModelSelectorServer(ctx context.Context, t *testing.T) (*Server, datastore.Datastore) {
+func newModelSelectorServer(ctx context.Context, t *testing.T) (*Server, datalayer.Datastore) {
 	t.Helper()
-	ds := datastore.NewStore()
-	extractor := inflightrequests.NewInflightRequestsExtractor(ds)
+	ds := inmemory.NewDatastore()
+	extractor := requestmetadata.NewRequestMetadataExtractor(ds)
 	notifSrc, err := notificationsource.New("test", extractor)
 	if err != nil {
 		t.Fatalf("failed to create notification source: %v", err)
@@ -66,7 +67,7 @@ func newModelSelectorServer(ctx context.Context, t *testing.T) (*Server, datasto
 		t.Fatalf("failed to create bodyfieldtoheader plugin: %v", err)
 	}
 
-	srv := NewServer([]framework.RequestProcessor{modelToHeaderPlugin}, nil).
+	srv := NewServer([]requesthandling.RequestProcessor{modelToHeaderPlugin}, nil).
 		WithModelSelector(profile, candidateModels).
 		WithEventNotifier(notifSrc)
 
@@ -74,9 +75,9 @@ func newModelSelectorServer(ctx context.Context, t *testing.T) (*Server, datasto
 }
 
 // setInflight directly sets the in-flight count on a model in the datastore.
-func setInflight(ds datastore.Datastore, name string, count int64) {
+func setInflight(ds datalayer.Datastore, name string, count int64) {
 	m := ds.GetOrCreateModel(name)
-	m.GetAttributes().Put(inflightrequests.InflightRequestsAttributeKey, inflightrequests.InflightRequestsCount{Requests: count})
+	m.GetAttributes().Put(requestmetadata.RequestMetadataAttributeKey, requestmetadata.RequestMetadataCount{Requests: count})
 }
 
 // callHandleRequestBody calls HandleRequestBody with a JSON body containing the given model name.
@@ -84,9 +85,9 @@ func callHandleRequestBody(t *testing.T, srv *Server, model string) []*eppb.Proc
 	t.Helper()
 	ctx := context.Background()
 	reqCtx := &RequestContext{
-		Request:    framework.NewInferenceRequest(),
-		Response:   framework.NewInferenceResponse(),
-		CycleState: framework.NewCycleState(),
+		Request:    requesthandling.NewInferenceRequest(),
+		Response:   requesthandling.NewInferenceResponse(),
+		CycleState: plugin.NewCycleState(),
 	}
 	body := []byte(`{"model":"` + model + `","messages":[{"role":"user","content":"hello"}]}`)
 	responses, err := srv.HandleRequestBody(ctx, reqCtx, body)

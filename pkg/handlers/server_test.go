@@ -115,7 +115,9 @@ func TestHandleResponseBody_Streaming(t *testing.T) {
 	wantFullBody := []byte(`{"choices":[{"text":"Hello!"}]}`)
 
 	ref := NewServer([]requesthandling.RequestProcessor{}, []requesthandling.ResponseProcessor{})
-	want, err := ref.HandleResponseBody(ctx, newTestRequestContext(), wantFullBody)
+	refCtx := newTestRequestContext()
+	refCtx.ResponseHeadersDeferred = true
+	want, err := ref.HandleResponseBody(ctx, refCtx, wantFullBody)
 	if err != nil {
 		t.Fatalf("reference HandleResponseBody: %v", err)
 	}

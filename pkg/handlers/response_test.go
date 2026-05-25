@@ -65,7 +65,9 @@ func TestHandleResponseBody_NoPlugins(t *testing.T) {
 
 	server := NewServer([]requesthandling.RequestProcessor{}, []requesthandling.ResponseProcessor{})
 	responseBody := []byte(`{"choices":[{"text":"Hello!"}]}`)
-	resp, err := server.HandleResponseBody(ctx, newTestRequestContext(), responseBody)
+	reqCtx := newTestRequestContext()
+	reqCtx.ResponseHeadersDeferred = true
+	resp, err := server.HandleResponseBody(ctx, reqCtx, responseBody)
 	if err != nil {
 		t.Fatalf("HandleResponseBody returned unexpected error: %v", err)
 	}

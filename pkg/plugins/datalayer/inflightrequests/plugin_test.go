@@ -22,8 +22,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/llm-d/llm-d-inference-payload-processor/pkg/framework"
-	"github.com/llm-d/llm-d-inference-payload-processor/pkg/framework/datalayer"
+	"github.com/llm-d/llm-d-inference-payload-processor/pkg/framework/interface/datalayer"
+	datasource "github.com/llm-d/llm-d-inference-payload-processor/pkg/framework/interface/datalayer/datasource"
+	"github.com/llm-d/llm-d-inference-payload-processor/pkg/framework/interface/requesthandling"
 )
 
 // fakeDataStore is an in-memory DataStore for tests.
@@ -47,28 +48,43 @@ func (f *fakeDataStore) GetOrCreateModel(name string) datalayer.Model {
 	return m
 }
 
+func (f *fakeDataStore) DeleteModel(name string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	delete(f.models, name)
+}
+
+func (f *fakeDataStore) Models() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	names := make([]string, 0, len(f.models))
+	for name := range f.models {
+		names = append(names, name)
+	}
+	return names
+}
+
 // makeRequestEvent creates a RequestEventType event with model and max_tokens.
-func makeRequestEvent(model string, maxTokens float64) datalayer.Event {
-	req := framework.NewInferenceRequest()
+func makeRequestEvent(model string, maxTokens float64) datasource.Event {
+	req := requesthandling.NewInferenceRequest()
 	req.Body["model"] = model
 	req.Body["max_tokens"] = maxTokens
-	return datalayer.Event{
-		Type:    datalayer.RequestEventType,
-		Payload: datalayer.RequestPayload{Request: req},
+	return datasource.Event{
+		Type:    datasource.RequestEventType,
+		Payload: datasource.RequestPayload{Request: req},
 	}
 }
 
 // makeResponseEvent creates a ResponseEventType event with model, duration, and max_tokens.
-// maxTokens mirrors the original request's max_tokens so the extractor can decrement correctly.
-func makeResponseEvent(model string, durationMs int, maxTokens float64) datalayer.Event {
-	req := framework.NewInferenceRequest()
+func makeResponseEvent(model string, durationMs int, maxTokens float64) datasource.Event {
+	req := requesthandling.NewInferenceRequest()
 	req.Body["model"] = model
 	req.Body["max_tokens"] = maxTokens
-	return datalayer.Event{
-		Type: datalayer.ResponseEventType,
-		Payload: datalayer.ResponsePayload{
+	return datasource.Event{
+		Type: datasource.ResponseEventType,
+		Payload: datasource.ResponsePayload{
 			Request:  req,
-			Response: framework.NewInferenceResponse(),
+			Response: requesthandling.NewInferenceResponse(),
 			Duration: time.Duration(durationMs) * time.Millisecond,
 		},
 	}
@@ -97,7 +113,7 @@ func newInflightRequestsTest(t *testing.T) (*InflightRequestsExtractor, *fakeDat
 func TestRequestIncrementsCounter(t *testing.T) {
 	ext, ds := newInflightRequestsTest(t)
 
-	batch := []datalayer.Event{makeRequestEvent("m1", 100)}
+	batch := []datasource.Event{makeRequestEvent("m1", 100)}
 	if err := ext.Extract(context.Background(), batch); err != nil {
 		t.Fatalf("Extract failed: %v", err)
 	}
@@ -114,8 +130,7 @@ func TestRequestIncrementsCounter(t *testing.T) {
 func TestResponseDecrementsCounter(t *testing.T) {
 	ext, ds := newInflightRequestsTest(t)
 
-	// Response carries the original request's max_tokens so the extractor can decrement correctly.
-	batch := []datalayer.Event{
+	batch := []datasource.Event{
 		makeRequestEvent("m1", 100),
 		makeResponseEvent("m1", 50, 100),
 	}
@@ -135,8 +150,7 @@ func TestResponseDecrementsCounter(t *testing.T) {
 func TestCounterFloorsAtZero(t *testing.T) {
 	ext, ds := newInflightRequestsTest(t)
 
-	// Response with no prior request — both counters must floor at zero.
-	batch := []datalayer.Event{makeResponseEvent("m1", 50, 100)}
+	batch := []datasource.Event{makeResponseEvent("m1", 50, 100)}
 	if err := ext.Extract(context.Background(), batch); err != nil {
 		t.Fatalf("Extract failed: %v", err)
 	}
@@ -153,7 +167,7 @@ func TestCounterFloorsAtZero(t *testing.T) {
 func TestInflightRequestsMultipleModels(t *testing.T) {
 	ext, ds := newInflightRequestsTest(t)
 
-	batch := []datalayer.Event{
+	batch := []datasource.Event{
 		makeRequestEvent("m1", 10),
 		makeRequestEvent("m2", 20),
 	}
@@ -175,7 +189,7 @@ func TestInflightRequestsMultipleModels(t *testing.T) {
 func TestInflightRequestsUnknownEventTypeIgnored(t *testing.T) {
 	ext, ds := newInflightRequestsTest(t)
 
-	batch := []datalayer.Event{{Type: "unknown"}}
+	batch := []datasource.Event{{Type: "unknown"}}
 	if err := ext.Extract(context.Background(), batch); err != nil {
 		t.Fatalf("Extract failed: %v", err)
 	}
@@ -191,11 +205,10 @@ func TestInflightRequestsUnknownEventTypeIgnored(t *testing.T) {
 func TestInflightRequestsMissingModelFieldIgnored(t *testing.T) {
 	ext, ds := newInflightRequestsTest(t)
 
-	// Payload without a "model" key — no counter should be updated.
-	req := framework.NewInferenceRequest()
+	req := requesthandling.NewInferenceRequest()
 	req.Body["max_tokens"] = float64(50)
-	batch := []datalayer.Event{
-		{Type: datalayer.RequestEventType, Payload: datalayer.RequestPayload{Request: req}},
+	batch := []datasource.Event{
+		{Type: datasource.RequestEventType, Payload: datasource.RequestPayload{Request: req}},
 	}
 	if err := ext.Extract(context.Background(), batch); err != nil {
 		t.Fatalf("Extract failed: %v", err)

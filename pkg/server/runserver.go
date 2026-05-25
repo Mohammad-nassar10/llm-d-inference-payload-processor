@@ -29,9 +29,9 @@ import (
 
 	"github.com/llm-d/llm-d-inference-payload-processor/internal/runnable"
 	tlsutil "github.com/llm-d/llm-d-inference-payload-processor/internal/tls"
-	"github.com/llm-d/llm-d-inference-payload-processor/pkg/framework"
-	"github.com/llm-d/llm-d-inference-payload-processor/pkg/framework/datalayer"
-	fwmodelselector "github.com/llm-d/llm-d-inference-payload-processor/pkg/framework/modelselector"
+	"github.com/llm-d/llm-d-inference-payload-processor/pkg/framework/interface/datalayer"
+	datasource "github.com/llm-d/llm-d-inference-payload-processor/pkg/framework/interface/datalayer/datasource"
+	fwmodelselector "github.com/llm-d/llm-d-inference-payload-processor/pkg/framework/interface/modelselector"
 	"github.com/llm-d/llm-d-inference-payload-processor/pkg/framework/interface/requesthandling"
 	"github.com/llm-d/llm-d-inference-payload-processor/pkg/handlers"
 )
@@ -44,7 +44,7 @@ type ExtProcServerRunner struct {
 	ResponsePlugins []requesthandling.ResponseProcessor
 	ModelSelector   fwmodelselector.ModelSelectorProfile
 	CandidateModels func() []datalayer.Model
-	EventNotifier   datalayer.EventNotifier
+	EventNotifier   datasource.EventNotifier
 }
 
 func NewDefaultExtProcServerRunner(port int) *ExtProcServerRunner {

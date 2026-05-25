@@ -20,8 +20,9 @@ import (
 	"context"
 	"encoding/json"
 
-	"github.com/llm-d/llm-d-inference-payload-processor/pkg/framework"
-	"github.com/llm-d/llm-d-inference-payload-processor/pkg/framework/datalayer"
+	"github.com/llm-d/llm-d-inference-payload-processor/pkg/framework/interface/datalayer"
+	datasource "github.com/llm-d/llm-d-inference-payload-processor/pkg/framework/interface/datalayer/datasource"
+	"github.com/llm-d/llm-d-inference-payload-processor/pkg/framework/interface/plugin"
 )
 
 const (
@@ -33,13 +34,13 @@ const (
 )
 
 // compile-time interface assertion
-var _ datalayer.Extractor = &InflightRequestsExtractor{}
+var _ datasource.Extractor = &InflightRequestsExtractor{}
 
 // ExtractorFactory creates a InflightRequestsExtractor with a nil DataStore.
-// The factory path is limited: the DataStore is not available via framework.Handle,
+// The factory path is limited: the DataStore is not available via plugin.Handle,
 // so the created extractor cannot write to the store. Use NewInflightRequestsExtractor
 // directly when constructing for production use.
-func ExtractorFactory(name string, _ json.RawMessage, _ framework.Handle) (framework.Plugin, error) {
+func ExtractorFactory(name string, _ json.RawMessage, _ plugin.Handle) (plugin.Plugin, error) {
 	return NewInflightRequestsExtractor(nil).WithName(name), nil
 }
 
@@ -55,26 +56,21 @@ func (r InflightRequestsCount) Clone() datalayer.Cloneable { return r }
 // It writes InflightRequestsCount to each model's InflightRequestsAttributeKey attribute.
 //
 // Extract is assumed to be called from a single goroutine (the NotificationSource event loop).
-// If parallel dispatch is introduced, add a sync.Mutex around counters and the DataStore write.
-//
-// TODO: counters leak if a request fails without a corresponding ResponseEventType (e.g. connection
-// drop, upstream error, context cancellation). The call site should fire a
-// synthetic ResponseEventType in its error/EOF path to keep counts accurate.
 type InflightRequestsExtractor struct {
-	typedName framework.TypedName
-	dataStore datalayer.DataStore
+	typedName plugin.TypedName
+	dataStore datalayer.Datastore
 	counters  map[string]InflightRequestsCount
 }
 
-func NewInflightRequestsExtractor(ds datalayer.DataStore) *InflightRequestsExtractor {
+func NewInflightRequestsExtractor(ds datalayer.Datastore) *InflightRequestsExtractor {
 	return &InflightRequestsExtractor{
-		typedName: framework.TypedName{Type: PluginType, Name: PluginType},
+		typedName: plugin.TypedName{Type: PluginType, Name: PluginType},
 		dataStore: ds,
 		counters:  make(map[string]InflightRequestsCount),
 	}
 }
 
-func (e *InflightRequestsExtractor) TypedName() framework.TypedName { return e.typedName }
+func (e *InflightRequestsExtractor) TypedName() plugin.TypedName { return e.typedName }
 
 // WithName sets the instance name, used by the factory when the plugin is configured by name.
 func (e *InflightRequestsExtractor) WithName(name string) *InflightRequestsExtractor {
@@ -82,13 +78,13 @@ func (e *InflightRequestsExtractor) WithName(name string) *InflightRequestsExtra
 	return e
 }
 
-func (e *InflightRequestsExtractor) Extract(_ context.Context, events []datalayer.Event) error {
+func (e *InflightRequestsExtractor) Extract(_ context.Context, events []datasource.Event) error {
 	updated := map[string]InflightRequestsCount{}
 
 	for _, ev := range events {
 		switch ev.Type {
-		case datalayer.RequestEventType:
-			p, ok := ev.Payload.(datalayer.RequestPayload)
+		case datasource.RequestEventType:
+			p, ok := ev.Payload.(datasource.RequestPayload)
 			if !ok {
 				continue
 			}
@@ -103,8 +99,8 @@ func (e *InflightRequestsExtractor) Extract(_ context.Context, events []datalaye
 			e.counters[model] = c
 			updated[model] = c
 
-		case datalayer.ResponseEventType:
-			p, ok := ev.Payload.(datalayer.ResponsePayload)
+		case datasource.ResponseEventType:
+			p, ok := ev.Payload.(datasource.ResponsePayload)
 			if !ok {
 				continue
 			}
