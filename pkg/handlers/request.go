@@ -29,6 +29,7 @@ import (
 	envoy "github.com/llm-d/llm-d-inference-payload-processor/pkg/common/envoy"
 	errcommon "github.com/llm-d/llm-d-inference-payload-processor/pkg/common/error"
 	logutil "github.com/llm-d/llm-d-inference-payload-processor/pkg/common/observability/logging"
+	datasource "github.com/llm-d/llm-d-inference-payload-processor/pkg/framework/interface/datalayer/datasource"
 	"github.com/llm-d/llm-d-inference-payload-processor/pkg/framework/interface/plugin"
 	"github.com/llm-d/llm-d-inference-payload-processor/pkg/framework/interface/requesthandling"
 	"github.com/llm-d/llm-d-inference-payload-processor/pkg/metrics"
@@ -69,6 +70,14 @@ func (s *Server) HandleRequestBody(ctx context.Context, reqCtx *RequestContext, 
 
 	if err := s.runRequestPlugins(ctx, reqCtx.CycleState, reqCtx.Request); err != nil {
 		return nil, err
+	}
+
+	// Notify the data layer of the incoming request.
+	if s.eventNotifier != nil {
+		s.eventNotifier.Notify(datasource.Event{
+			Type:    datasource.RequestEventType,
+			Payload: datasource.RequestPayload{Request: reqCtx.Request},
+		})
 	}
 
 	bodyMutated := reqCtx.Request.BodyMutated()

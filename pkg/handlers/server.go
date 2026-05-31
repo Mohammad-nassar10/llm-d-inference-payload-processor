@@ -33,6 +33,7 @@ import (
 	envoy "github.com/llm-d/llm-d-inference-payload-processor/pkg/common/envoy"
 	errcommon "github.com/llm-d/llm-d-inference-payload-processor/pkg/common/error"
 	logutil "github.com/llm-d/llm-d-inference-payload-processor/pkg/common/observability/logging"
+	datasource "github.com/llm-d/llm-d-inference-payload-processor/pkg/framework/interface/datalayer/datasource"
 	"github.com/llm-d/llm-d-inference-payload-processor/pkg/framework/interface/plugin"
 	"github.com/llm-d/llm-d-inference-payload-processor/pkg/framework/interface/requesthandling"
 	"github.com/llm-d/llm-d-inference-payload-processor/version"
@@ -53,11 +54,18 @@ func NewServer(requestPlugins []requesthandling.RequestProcessor, responsePlugin
 	}
 }
 
+// WithEventNotifier sets the event notifier used to feed the data layer.
+func (s *Server) WithEventNotifier(n datasource.EventNotifier) *Server {
+	s.eventNotifier = n
+	return s
+}
+
 // Server implements the Envoy external processing server.
 // https://www.envoyproxy.io/docs/envoy/latest/api-v3/service/ext_proc/v3/external_processor.proto
 type Server struct {
 	requestPlugins  []requesthandling.RequestProcessor
 	responsePlugins []requesthandling.ResponseProcessor
+	eventNotifier   datasource.EventNotifier
 }
 
 // RequestContext stores context information during the lifetime of an HTTP request.
