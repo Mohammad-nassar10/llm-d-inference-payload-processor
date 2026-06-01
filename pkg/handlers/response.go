@@ -67,6 +67,7 @@ func (s *Server) HandleResponseBody(ctx context.Context, reqCtx *RequestContext,
 				Request:  reqCtx.Request,
 				Response: reqCtx.Response,
 				Duration: reqCtx.ResponseCompleteTimestamp.Sub(reqCtx.RequestReceivedTimestamp),
+				TTFT:     reqCtx.ResponseFirstChunkTimestamp.Sub(reqCtx.RequestSentTimestamp),
 			},
 		})
 	}

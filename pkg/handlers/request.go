@@ -95,6 +95,7 @@ func (s *Server) HandleRequestBody(ctx context.Context, reqCtx *RequestContext, 
 	}
 
 	metrics.RecordSuccessCounter()
+	reqCtx.RequestSentTimestamp = time.Now()
 
 	ret = append(ret, &eppb.ProcessingResponse{
 		Response: &eppb.ProcessingResponse_RequestHeaders{

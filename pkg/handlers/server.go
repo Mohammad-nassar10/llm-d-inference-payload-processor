@@ -72,6 +72,7 @@ type Server struct {
 // RequestContext stores context information during the lifetime of an HTTP request.
 type RequestContext struct {
 	RequestReceivedTimestamp    time.Time
+	RequestSentTimestamp        time.Time
 	ResponseFirstChunkTimestamp time.Time
 	ResponseCompleteTimestamp   time.Time
 	CycleState                  *plugin.CycleState
