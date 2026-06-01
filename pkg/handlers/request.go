@@ -72,14 +72,6 @@ func (s *Server) HandleRequestBody(ctx context.Context, reqCtx *RequestContext, 
 		return nil, err
 	}
 
-	// Notify the data layer of the incoming request.
-	if s.eventNotifier != nil {
-		s.eventNotifier.Notify(datasource.Event{
-			Type:    datasource.RequestEventType,
-			Payload: datasource.RequestPayload{Request: reqCtx.Request},
-		})
-	}
-
 	bodyMutated := reqCtx.Request.BodyMutated()
 	var mutatedBodyBytes []byte
 	if bodyMutated {
@@ -92,6 +84,14 @@ func (s *Server) HandleRequestBody(ctx context.Context, reqCtx *RequestContext, 
 	} else {
 		// Always set Content-Length to inform Envoy of the body size that will follow
 		reqCtx.Request.SetHeader(contentLengthHeader, strconv.Itoa(len(requestBodyBytes)))
+	}
+
+	// Notify the data layer of the incoming request after headers are fully formed.
+	if s.eventNotifier != nil {
+		s.eventNotifier.Notify(datasource.Event{
+			Type:    datasource.RequestEventType,
+			Payload: datasource.RequestPayload{Request: reqCtx.Request},
+		})
 	}
 
 	metrics.RecordSuccessCounter()
