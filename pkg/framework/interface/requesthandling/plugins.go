@@ -22,6 +22,20 @@ import (
 	"github.com/llm-d/llm-d-inference-payload-processor/pkg/framework/interface/plugin"
 )
 
+type PreProcessor interface {
+	plugin.Plugin
+
+	// PreProcess is invoked to pre-process requests before the request plugins of the selected profile run.
+	PreProcess(ctx context.Context, cycleState *plugin.CycleState, request *InferenceRequest) error
+}
+
+type ProfilePicker interface {
+	plugin.Plugin
+
+	// Pick selects the Profile to run from a list of candidate profiles, while taking into consideration the request properties.
+	Pick(ctx context.Context, cycleState *plugin.CycleState, request *InferenceRequest, profiles map[string]*Profile) (*Profile, error)
+}
+
 type RequestProcessor interface {
 	plugin.Plugin
 	// ProcessRequest runs the RequestProcessor plugin.
@@ -34,4 +48,11 @@ type ResponseProcessor interface {
 	// ProcessResponse runs the ResponseProcessor plugin.
 	// ResponseProcessor can mutate the headers and/or the body of the response.
 	ProcessResponse(ctx context.Context, cycleState *plugin.CycleState, response *InferenceResponse) error
+}
+
+type PostProcessor interface {
+	plugin.Plugin
+
+	// PostProcess is invoked to post-process requests after the response plugins of the selected profile run.
+	PostProcess(ctx context.Context, cycleState *plugin.CycleState, request *InferenceRequest) error
 }
