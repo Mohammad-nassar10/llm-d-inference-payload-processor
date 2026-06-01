@@ -238,6 +238,7 @@ func (r *Runner) Run(ctx context.Context) error {
 		setupLog.Error(err, "failed to start notification source")
 		return err
 	}
+	defer notifSrc.Stop()
 
 	// Setup ExtProc Server Runner.
 	serverRunner := &runserver.ExtProcServerRunner{
@@ -245,6 +246,7 @@ func (r *Runner) Run(ctx context.Context) error {
 		SecureServing:   opts.SecureServing,
 		RequestPlugins:  r.requestPlugins,
 		ResponsePlugins: r.responsePlugins,
+		EventNotifier:   notifSrc,
 	}
 
 	// Register health server.
