@@ -205,7 +205,9 @@ func (r *Runner) Run(ctx context.Context) error {
 		SecureServing:   opts.SecureServing,
 		RequestPlugins:  r.requestPlugins,
 		ResponsePlugins: r.responsePlugins,
-		EventNotifier:   notifSrc,
+	}
+	if len(r.notificationSources) > 0 {
+		serverRunner.EventNotifier = r.notificationSources[0]
 	}
 
 	// Register health server.
