@@ -57,16 +57,19 @@ type ModelSelectorProfile struct {
 	picker  modelselector.Picker
 }
 
-// WithFilters sets the given filter plugins as the Filter plugins.
-func (p *ModelSelectorProfile) WithFilters(filters ...modelselector.Filter) *ModelSelectorProfile {
-	p.filters = filters
-	return p
+// Filters returns the filter plugins registered in the profile.
+func (p *ModelSelectorProfile) Filters() []modelselector.Filter {
+	return p.filters
 }
 
-// WithScorers sets the given scorer plugins as the Scorer plugins.
-func (p *ModelSelectorProfile) WithScorers(scorers ...*WeightedScorer) *ModelSelectorProfile {
-	p.scorers = scorers
-	return p
+// Scorers returns the weighted scorer plugins registered in the profile.
+func (p *ModelSelectorProfile) Scorers() []*WeightedScorer {
+	return p.scorers
+}
+
+// Picker returns the picker plugin registered in the profile.
+func (p *ModelSelectorProfile) Picker() modelselector.Picker {
+	return p.picker
 }
 
 // WithPicker sets the given picker plugin as the Picker plugin.

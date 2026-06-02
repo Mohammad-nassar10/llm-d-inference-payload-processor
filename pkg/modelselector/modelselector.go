@@ -43,6 +43,11 @@ type ModelSelector struct {
 	profile *ModelSelectorProfile
 }
 
+// Profile returns the ModelSelectorProfile used by this selector.
+func (s *ModelSelector) Profile() *ModelSelectorProfile {
+	return s.profile
+}
+
 // Select runs the model selection pipeline (Filter → Score → Pick) and returns the selected model.
 func (s *ModelSelector) Select(ctx context.Context, request *requesthandling.InferenceRequest, cycleState *plugin.CycleState, candidateModels []datalayer.Model) (result *modelselector.ProfileRunResult, err error) {
 	logger := log.FromContext(ctx)

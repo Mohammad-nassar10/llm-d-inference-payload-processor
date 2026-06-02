@@ -37,6 +37,111 @@ plugins:
   type: test-picker
 `
 
+const successConfigWithProfileText = `
+apiVersion: llm-d.ai/v1alpha1
+kind: PayloadProcessorConfig
+plugins:
+- type: test-profile-picker
+- type: test-request-processor
+- type: test-response-processor
+profilePicker:
+  pluginRef: test-profile-picker
+profiles:
+- name: default
+  plugins:
+    request:
+    - pluginRef: test-request-processor
+    response:
+    - pluginRef: test-response-processor
+`
+
+const successConfigWithTwoProfilesText = `
+apiVersion: llm-d.ai/v1alpha1
+kind: PayloadProcessorConfig
+plugins:
+- type: test-profile-picker
+- type: test-request-processor
+- type: test-response-processor
+profilePicker:
+  pluginRef: test-profile-picker
+profiles:
+- name: one
+  plugins:
+    request:
+    - pluginRef: test-request-processor
+- name: two
+  plugins:
+    response:
+    - pluginRef: test-response-processor
+`
+
+const successConfigWithNoProfilePickerText = `
+apiVersion: llm-d.ai/v1alpha1
+kind: PayloadProcessorConfig
+plugins:
+- type: test-request-processor
+- type: test-response-processor
+profiles:
+- name: default
+  plugins:
+    request:
+    - pluginRef: test-request-processor
+    response:
+    - pluginRef: test-response-processor
+`
+const successConfigWithProfilePickerNotReferencedText = `
+apiVersion: llm-d.ai/v1alpha1
+kind: PayloadProcessorConfig
+plugins:
+- type: test-profile-picker
+- type: test-request-processor
+- type: test-response-processor
+profiles:
+- name: default
+  plugins:
+    request:
+    - pluginRef: test-request-processor
+    response:
+    - pluginRef: test-response-processor
+`
+
+// datalayerSuccessConfigText has a valid notification-source reference.
+const datalayerSuccessConfigText = `
+apiVersion: llm-d.ai/v1alpha1
+kind: PayloadProcessorConfig
+plugins:
+- name: my-notif-source
+  type: notification-source
+notificationSources:
+- pluginRef: my-notif-source
+`
+
+// datalayerMissingRefConfigText references a plugin that does not exist.
+const datalayerMissingRefConfigText = `
+apiVersion: llm-d.ai/v1alpha1
+kind: PayloadProcessorConfig
+plugins:
+- name: test1
+  type: test-plugin
+  parameters:
+    threshold: 10
+notificationSources:
+- pluginRef: does-not-exist
+`
+
+// datalayerWrongTypeConfigText references a plugin that is not a NotificationSource.
+const datalayerWrongTypeConfigText = `
+apiVersion: llm-d.ai/v1alpha1
+kind: PayloadProcessorConfig
+plugins:
+- name: test1
+  type: test-plugin
+  parameters:
+    threshold: 10
+notificationSources:
+- pluginRef: test1
+`
+
 // --- Invalid Configurations (Syntax/Structure) ---
 
 // errorBadYamlText contains invalid YAML syntax.
@@ -93,39 +198,75 @@ plugins:
     threshold: 20
 `
 
-// datalayerSuccessConfigText has a valid notification-source reference.
-const datalayerSuccessConfigText = `
+const errorConfigWithTwoProfilesNoPickerText = `
 apiVersion: llm-d.ai/v1alpha1
 kind: PayloadProcessorConfig
 plugins:
-- name: my-notif-source
-  type: notification-source
-notificationSources:
-- pluginRef: my-notif-source
+- type: test-request-processor
+- type: test-response-processor
+profilePicker:
+  pluginRef: test-profile-picker
+profiles:
+- name: one
+  plugins:
+    request:
+    - pluginRef: test-request-processor
+- name: two
+  plugins:
+    response:
+    - pluginRef: test-response-processor
 `
 
-// datalayerMissingRefConfigText references a plugin that does not exist.
-const datalayerMissingRefConfigText = `
+// modelSelectorAllPluginTypesText wires a Filter, a weighted Scorer, and a Picker
+// alongside a model-selector RequestProcessor plugin in the same profile.
+const modelSelectorAllPluginTypesText = `
 apiVersion: llm-d.ai/v1alpha1
 kind: PayloadProcessorConfig
 plugins:
-- name: test1
-  type: test-plugin
-  parameters:
-    threshold: 10
-notificationSources:
-- pluginRef: does-not-exist
+- type: model-selector
+- type: test-filter
+- type: cost-scorer
+- type: max-score-picker
+profiles:
+- name: default
+  plugins:
+    request:
+    - pluginRef: model-selector
+    - pluginRef: test-filter
+    - pluginRef: cost-scorer
+      weight: 2.5
+    - pluginRef: max-score-picker
 `
 
-// datalayerWrongTypeConfigText references a plugin that is not a NotificationSource.
-const datalayerWrongTypeConfigText = `
+// modelSelectorScorerMissingWeightText is an error case: scorer without a weight.
+const modelSelectorScorerMissingWeightText = `
 apiVersion: llm-d.ai/v1alpha1
 kind: PayloadProcessorConfig
 plugins:
-- name: test1
+- type: model-selector
+- type: cost-scorer
+profiles:
+- name: default
+  plugins:
+    request:
+    - pluginRef: model-selector
+    - pluginRef: cost-scorer
+`
+
+// modelSelectorUnknownPluginTypeText is an error case: plugin that is none of the accepted interfaces.
+const modelSelectorUnknownPluginTypeText = `
+apiVersion: llm-d.ai/v1alpha1
+kind: PayloadProcessorConfig
+plugins:
+- type: model-selector
+- name: bare-plugin
   type: test-plugin
   parameters:
-    threshold: 10
-notificationSources:
-- pluginRef: test1
+    threshold: 1
+profiles:
+- name: default
+  plugins:
+    request:
+    - pluginRef: model-selector
+    - pluginRef: bare-plugin
 `

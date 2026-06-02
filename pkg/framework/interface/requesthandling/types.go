@@ -18,6 +18,8 @@ package requesthandling
 
 import (
 	"k8s.io/apimachinery/pkg/util/sets"
+
+	"github.com/llm-d/llm-d-inference-payload-processor/pkg/framework/interface/plugin"
 )
 
 func newInferenceMessage() InferenceMessage {
@@ -115,4 +117,7 @@ type Profile struct {
 	// ResponsePlugins are the response processing plugin instances executed by the response handler,
 	// in the same order provided in the configuration file.
 	ResponsePlugins []ResponseProcessor
+	// ModelSelectorPlugins are the Filter, Scorer (including WeightedScorer), and Picker plugin
+	// instances to be wired into any model-selector plugin present in RequestPlugins.
+	ModelSelectorPlugins []plugin.Plugin
 }
