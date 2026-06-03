@@ -35,17 +35,17 @@ func init() {
 	log.SetLogger(logr.Discard())
 }
 
-// BenchmarkModelSelectorProfileRun measures the per-request cost of the
-// ModelSelectorProfile.Run hot path (filter → score → pick) at different
+// BenchmarkModelSelectorPipelineRun measures the per-request cost of the
+// ModelSelectorPipeline.Run hot path (filter → score → pick) at different
 // model counts. This benchmark serves as a regression guard for per-request
 // allocations in the model selection framework.
 //
 // Run:
 //
-//	go test -run='^$' -bench=BenchmarkModelSelectorProfileRun -benchmem -count=5 \
+//	go test -run='^$' -bench=BenchmarkModelSelectorPipelineRun -benchmem -count=5 \
 //	    ./pkg/modelselector/ | tee bench.out
 //	benchstat bench.out
-func BenchmarkModelSelectorProfileRun(b *testing.B) {
+func BenchmarkModelSelectorPipelineRun(b *testing.B) {
 	ctx := context.Background()
 
 	// Create test scorers that simulate realistic work
@@ -63,8 +63,8 @@ func BenchmarkModelSelectorProfileRun(b *testing.B) {
 		typedName: plugin.TypedName{Type: "bench-picker", Name: "max-score"},
 	}
 
-	profile := NewModelSelectorProfile().WithPicker(picker)
-	if err := profile.AddPlugins(
+	pipeline := NewModelSelectorPipeline().WithPicker(picker)
+	if err := pipeline.AddPlugins(
 		NewWeightedScorer(scorer1, 1.0),
 		NewWeightedScorer(scorer2, 1.0),
 		NewWeightedScorer(scorer3, 1.0),
@@ -82,7 +82,7 @@ func BenchmarkModelSelectorProfileRun(b *testing.B) {
 			b.ResetTimer()
 			for i := 0; i < b.N; i++ {
 				cycleState := plugin.NewCycleState()
-				result, err := profile.Run(ctx, request, cycleState, models)
+				result, err := pipeline.Run(ctx, request, cycleState, models)
 				if err != nil {
 					b.Fatalf("Run failed: %v", err)
 				}
@@ -127,7 +127,7 @@ type benchPicker struct {
 
 func (p *benchPicker) TypedName() plugin.TypedName { return p.typedName }
 
-func (p *benchPicker) Pick(_ context.Context, _ *plugin.CycleState, scoredModels []*modelselector.ScoredModel) *modelselector.ProfileRunResult {
+func (p *benchPicker) Pick(_ context.Context, _ *plugin.CycleState, scoredModels []*modelselector.ScoredModel) *modelselector.PipelineRunResult {
 	if len(scoredModels) == 0 {
 		return nil
 	}
@@ -137,5 +137,5 @@ func (p *benchPicker) Pick(_ context.Context, _ *plugin.CycleState, scoredModels
 			best = sm
 		}
 	}
-	return &modelselector.ProfileRunResult{TargetModel: best.Model}
+	return &modelselector.PipelineRunResult{TargetModel: best.Model}
 }

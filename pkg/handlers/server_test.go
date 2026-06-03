@@ -33,8 +33,11 @@ import (
 	"github.com/llm-d/llm-d-inference-payload-processor/pkg/framework/interface/requesthandling"
 	"github.com/llm-d/llm-d-inference-payload-processor/pkg/framework/plugins/requesthandling/basemodelextractor"
 	"github.com/llm-d/llm-d-inference-payload-processor/pkg/framework/plugins/requesthandling/bodyfieldtoheader"
+	"github.com/llm-d/llm-d-inference-payload-processor/pkg/framework/plugins/requesthandling/profilepicker/single"
 	"github.com/llm-d/llm-d-inference-payload-processor/test/utils"
 )
+
+const testProfileName = "default"
 
 func TestHandleRequestBody(t *testing.T) {
 	ctx := logutil.NewTestLoggerIntoContext(context.Background())
@@ -92,7 +95,9 @@ func TestHandleRequestBody(t *testing.T) {
 
 	baseModelToHeaderPlugin := &basemodelextractor.BaseModelToHeaderPlugin{AdaptersStore: basemodelextractor.NewAdaptersStore()}
 	modelToHeaderPlugin, _ := bodyfieldtoheader.NewBodyFieldToHeaderPlugin(modelField, bodyfieldtoheader.ModelHeader)
-	srv := NewServer([]requesthandling.RequestProcessor{modelToHeaderPlugin, baseModelToHeaderPlugin}, []requesthandling.ResponseProcessor{})
+	profiles := newTestProfiles()
+	addRequestPlugins(profiles, modelToHeaderPlugin, baseModelToHeaderPlugin)
+	srv := newServerForTest(profiles)
 	reqCtx := &RequestContext{
 		CycleState: plugin.NewCycleState(),
 		Request:    requesthandling.NewInferenceRequest(),
@@ -114,8 +119,9 @@ func TestHandleResponseBody_Streaming(t *testing.T) {
 	ctx := logutil.NewTestLoggerIntoContext(context.Background())
 	wantFullBody := []byte(`{"choices":[{"text":"Hello!"}]}`)
 
-	ref := NewServer([]requesthandling.RequestProcessor{}, []requesthandling.ResponseProcessor{})
-	want, err := ref.HandleResponseBody(ctx, newTestRequestContext(), wantFullBody)
+	profiles := newTestProfiles()
+	ref := newServerForTest(profiles)
+	want, err := ref.HandleResponseBody(ctx, newTestRequestContext(profiles), wantFullBody)
 	if err != nil {
 		t.Fatalf("reference HandleResponseBody: %v", err)
 	}
@@ -154,7 +160,8 @@ func TestHandleResponseBody_Streaming(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			streamCtx, cancel := context.WithCancel(logutil.NewTestLoggerIntoContext(context.Background()))
-			srv := NewServer([]requesthandling.RequestProcessor{}, []requesthandling.ResponseProcessor{})
+			profiles := newTestProfiles()
+			srv := newServerForTest(profiles)
 			testListener, errChan := utils.SetupTestStreamingServer(t, streamCtx, srv)
 			process, conn := utils.GetStreamingServerClient(streamCtx, t)
 			defer conn.Close()
@@ -164,12 +171,47 @@ func TestHandleResponseBody_Streaming(t *testing.T) {
 				testListener.Close()
 			}()
 
+			request := &extProcPb.ProcessingRequest{
+				Request: &extProcPb.ProcessingRequest_RequestHeaders{},
+			}
+			if err := process.Send(request); err != nil {
+				t.Fatalf("send request headers: %v", err)
+			}
+
+			request = &extProcPb.ProcessingRequest{
+				Request: &extProcPb.ProcessingRequest_RequestBody{
+					RequestBody: &extProcPb.HttpBody{
+						Body:        []byte("{\"model\":\"testing\"}"),
+						EndOfStream: true,
+					},
+				},
+			}
+			if err := process.Send(request); err != nil {
+				t.Fatalf("send request body: %v", err)
+			}
+
+			msg, err := process.Recv()
+			if err != nil {
+				t.Fatalf("receive error: %v", err)
+			}
+			if msg.GetRequestHeaders() == nil {
+				t.Fatalf("Didn't receive the Processing_Response for Request Headers")
+			}
+
+			msg, err = process.Recv()
+			if err != nil {
+				t.Fatalf("receive error: %v", err)
+			}
+			if msg.GetRequestBody() == nil {
+				t.Fatalf("Didn't receive the Processing_Response for Request Body")
+			}
+
 			respHeaders := utils.BuildEnvoyGRPCHeaders(map[string]string{
 				"x-test":       "body",
 				":method":      "POST",
 				"content-type": "text/event-stream",
 			}, true)
-			request := &extProcPb.ProcessingRequest{
+			request = &extProcPb.ProcessingRequest{
 				Request: &extProcPb.ProcessingRequest_ResponseHeaders{
 					ResponseHeaders: respHeaders,
 				},
@@ -208,4 +250,25 @@ func TestHandleResponseBody_Streaming(t *testing.T) {
 			}
 		})
 	}
+}
+
+func newServerForTest(profiles map[string]*requesthandling.Profile) *Server {
+	return NewServer(single.NewSingleProfilePicker(), profiles)
+}
+
+func newTestProfiles() map[string]*requesthandling.Profile {
+	return map[string]*requesthandling.Profile{
+		testProfileName: {
+			RequestPlugins:  []requesthandling.RequestProcessor{},
+			ResponsePlugins: []requesthandling.ResponseProcessor{},
+		},
+	}
+}
+
+func addRequestPlugins(p map[string]*requesthandling.Profile, plugins ...requesthandling.RequestProcessor) {
+	p[testProfileName].RequestPlugins = plugins
+}
+
+func withResponsePlugins(p map[string]*requesthandling.Profile, plugins ...requesthandling.ResponseProcessor) {
+	p[testProfileName].ResponsePlugins = plugins
 }

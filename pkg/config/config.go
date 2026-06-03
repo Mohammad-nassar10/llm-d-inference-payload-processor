@@ -39,4 +39,7 @@ type Config struct {
 
 	// NotificationSources are the notification-source plugin instances to start.
 	NotificationSources []datasource.NotificationSource
+
+	// PollingSources are the polling-source plugin instances to start.
+	PollingSources []datasource.PollingSource
 }

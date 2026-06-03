@@ -270,3 +270,40 @@ profiles:
     - pluginRef: model-selector
     - pluginRef: bare-plugin
 `
+
+// pollingSourceSuccessConfigText has a valid polling-source reference.
+const pollingSourceSuccessConfigText = `
+apiVersion: llm-d.ai/v1alpha1
+kind: PayloadProcessorConfig
+plugins:
+- name: my-polling-source
+  type: polling-source
+pollingSources:
+- pluginRef: my-polling-source
+`
+
+// pollingSourceMissingRefConfigText references a plugin that does not exist.
+const pollingSourceMissingRefConfigText = `
+apiVersion: llm-d.ai/v1alpha1
+kind: PayloadProcessorConfig
+plugins:
+- name: test1
+  type: test-plugin
+  parameters:
+    threshold: 10
+pollingSources:
+- pluginRef: does-not-exist
+`
+
+// pollingSourceWrongTypeConfigText references a plugin that is not a PollingSource.
+const pollingSourceWrongTypeConfigText = `
+apiVersion: llm-d.ai/v1alpha1
+kind: PayloadProcessorConfig
+plugins:
+- name: test1
+  type: test-plugin
+  parameters:
+    threshold: 10
+pollingSources:
+- pluginRef: test1
+`

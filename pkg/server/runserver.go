@@ -36,11 +36,11 @@ import (
 
 // ExtProcServerRunner provides methods to manage an external process server.
 type ExtProcServerRunner struct {
-	GrpcPort        int
-	SecureServing   bool
-	RequestPlugins  []requesthandling.RequestProcessor
-	ResponsePlugins []requesthandling.ResponseProcessor
-	EventNotifier   datasource.EventNotifier
+	GrpcPort      int
+	SecureServing bool
+	ProfilePicker requesthandling.ProfilePicker
+	Profiles      map[string]*requesthandling.Profile
+  EventNotifier   datasource.EventNotifier
 }
 
 func NewDefaultExtProcServerRunner(port int) *ExtProcServerRunner {
@@ -69,7 +69,7 @@ func (r *ExtProcServerRunner) AsRunnable(logger logr.Logger) manager.Runnable {
 			srv = grpc.NewServer()
 		}
 
-		server := handlers.NewServer(r.RequestPlugins, r.ResponsePlugins)
+		server := handlers.NewServer(r.ProfilePicker, r.Profiles)
 		if r.EventNotifier != nil {
 			server.WithEventNotifier(r.EventNotifier)
 		}

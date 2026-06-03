@@ -66,7 +66,7 @@ type testPicker struct {
 }
 
 func (p *testPicker) TypedName() plugin.TypedName { return p.typedName }
-func (p *testPicker) Pick(_ context.Context, _ *plugin.CycleState, scoredModels []*modelselector.ScoredModel) *modelselector.ProfileRunResult {
+func (p *testPicker) Pick(_ context.Context, _ *plugin.CycleState, scoredModels []*modelselector.ScoredModel) *modelselector.PipelineRunResult {
 	p.callCount++
 	if len(scoredModels) == 0 {
 		return nil
@@ -77,10 +77,10 @@ func (p *testPicker) Pick(_ context.Context, _ *plugin.CycleState, scoredModels 
 			best = sm
 		}
 	}
-	return &modelselector.ProfileRunResult{TargetModel: best.Model}
+	return &modelselector.PipelineRunResult{TargetModel: best.Model}
 }
 
-func TestProfileRun(t *testing.T) {
+func TestPipelineRun(t *testing.T) {
 	modelA := datalayer.NewModel("model-a")
 	modelB := datalayer.NewModel("model-b")
 	modelC := datalayer.NewModel("model-c")
@@ -168,20 +168,20 @@ func TestProfileRun(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			picker := &testPicker{typedName: plugin.TypedName{Type: "test-picker", Name: "max-score"}}
-			profile := NewModelSelectorProfile().WithPicker(picker)
+			pipeline := NewModelSelectorPipeline().WithPicker(picker)
 
 			if tt.filter != nil {
-				if err := profile.AddPlugins(tt.filter); err != nil {
+				if err := pipeline.AddPlugins(tt.filter); err != nil {
 					t.Fatalf("AddPlugins(filter) failed: %v", err)
 				}
 			}
 			if tt.scorer != nil {
-				if err := profile.AddPlugins(NewWeightedScorer(tt.scorer, 1.0)); err != nil {
+				if err := pipeline.AddPlugins(NewWeightedScorer(tt.scorer, 1.0)); err != nil {
 					t.Fatalf("AddPlugins(scorer) failed: %v", err)
 				}
 			}
 
-			result, err := profile.Run(context.Background(), requesthandling.NewInferenceRequest(), plugin.NewCycleState(), tt.models)
+			result, err := pipeline.Run(context.Background(), requesthandling.NewInferenceRequest(), plugin.NewCycleState(), tt.models)
 
 			if tt.wantErr {
 				if err == nil {
@@ -237,12 +237,12 @@ func TestScoreWeightAccumulation(t *testing.T) {
 
 	// cost weight=3, latency weight=1 → model-a should win (3*1.0 + 1*0.0 = 3.0 vs 3*0.0 + 1*1.0 = 1.0)
 	picker := &testPicker{typedName: plugin.TypedName{Type: "test-picker", Name: "max-score"}}
-	profile := NewModelSelectorProfile().WithPicker(picker)
-	if err := profile.AddPlugins(NewWeightedScorer(scorer1, 3.0), NewWeightedScorer(scorer2, 1.0)); err != nil {
+	pipeline := NewModelSelectorPipeline().WithPicker(picker)
+	if err := pipeline.AddPlugins(NewWeightedScorer(scorer1, 3.0), NewWeightedScorer(scorer2, 1.0)); err != nil {
 		t.Fatalf("AddPlugins failed: %v", err)
 	}
 
-	result, err := profile.Run(context.Background(), requesthandling.NewInferenceRequest(), plugin.NewCycleState(), []datalayer.Model{modelA, modelB})
+	result, err := pipeline.Run(context.Background(), requesthandling.NewInferenceRequest(), plugin.NewCycleState(), []datalayer.Model{modelA, modelB})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -278,39 +278,39 @@ func TestScoreRangeEnforcement(t *testing.T) {
 
 func TestAddPlugins(t *testing.T) {
 	t.Run("scorer without weight returns error", func(t *testing.T) {
-		profile := NewModelSelectorProfile()
+		pipeline := NewModelSelectorPipeline()
 		scorer := &testScorer{typedName: plugin.TypedName{Type: "test-scorer", Name: "cost"}}
-		err := profile.AddPlugins(scorer)
+		err := pipeline.AddPlugins(scorer)
 		if err == nil {
 			t.Fatal("expected error for scorer without weight")
 		}
 	})
 
 	t.Run("duplicate picker returns error", func(t *testing.T) {
-		profile := NewModelSelectorProfile()
+		pipeline := NewModelSelectorPipeline()
 		picker1 := &testPicker{typedName: plugin.TypedName{Type: "test-picker", Name: "first"}}
 		picker2 := &testPicker{typedName: plugin.TypedName{Type: "test-picker", Name: "second"}}
-		if err := profile.AddPlugins(picker1); err != nil {
+		if err := pipeline.AddPlugins(picker1); err != nil {
 			t.Fatalf("first picker should succeed: %v", err)
 		}
-		err := profile.AddPlugins(picker2)
+		err := pipeline.AddPlugins(picker2)
 		if err == nil {
 			t.Fatal("expected error for duplicate picker")
 		}
 	})
 
 	t.Run("weighted scorer registered correctly", func(t *testing.T) {
-		profile := NewModelSelectorProfile()
+		pipeline := NewModelSelectorPipeline()
 		scorer := &testScorer{typedName: plugin.TypedName{Type: "test-scorer", Name: "cost"}}
 		ws := NewWeightedScorer(scorer, 2.0)
-		if err := profile.AddPlugins(ws); err != nil {
+		if err := pipeline.AddPlugins(ws); err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		if len(profile.scorers) != 1 {
-			t.Errorf("expected 1 scorer, got %d", len(profile.scorers))
+		if len(pipeline.scorers) != 1 {
+			t.Errorf("expected 1 scorer, got %d", len(pipeline.scorers))
 		}
-		if profile.scorers[0].Weight() != 2.0 {
-			t.Errorf("expected weight 2.0, got %f", profile.scorers[0].Weight())
+		if pipeline.scorers[0].Weight() != 2.0 {
+			t.Errorf("expected weight 2.0, got %f", pipeline.scorers[0].Weight())
 		}
 	})
 }

@@ -29,11 +29,11 @@ type ScoredModel struct {
 	Score float64
 }
 
-// ProfileRunResult captures the profile run result.
-type ProfileRunResult struct {
+// PipelineRunResult captures the pipeline run result.
+type PipelineRunResult struct {
 	TargetModel datalayer.Model
 }
 
-type ModelSelectorProfile interface {
-	Run(ctx context.Context, request *requesthandling.InferenceRequest, cycleState *plugin.CycleState, candidateModels []datalayer.Model) (*ProfileRunResult, error)
+type ModelSelectorPipeline interface {
+	Run(ctx context.Context, request *requesthandling.InferenceRequest, cycleState *plugin.CycleState, candidateModels []datalayer.Model) (*PipelineRunResult, error)
 }

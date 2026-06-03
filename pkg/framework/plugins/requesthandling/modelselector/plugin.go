@@ -38,18 +38,18 @@ const (
 var _ requesthandling.RequestProcessor = &ModelSelectorPlugin{}
 
 // ModelSelectorPluginFactory is the factory function for the ModelSelector RequestProcessor plugin.
-// It creates a plugin with an empty profile; plugins are wired in by the configuration loader.
+// It creates a plugin with an empty pipeline; plugins are wired in by the configuration loader.
 func ModelSelectorPluginFactory(name string, _ json.RawMessage, handle plugin.Handle) (plugin.Plugin, error) {
-	return NewModelSelectorPlugin(ms.NewModelSelectorProfile(), handle.Datastore()).WithName(name), nil
+	return NewModelSelectorPlugin(ms.NewModelSelectorPipeline(), handle.Datastore()).WithName(name), nil
 }
 
 // NewModelSelectorPlugin creates a ModelSelector RequestProcessor plugin.
 // Candidate models are read from the Datastore on each request.
-// Plugins are added to the profile via AddPlugins after construction.
-func NewModelSelectorPlugin(profile *ms.ModelSelectorProfile, datastore datalayer.Datastore) *ModelSelectorPlugin {
+// Plugins are added to the pipeline via AddPlugins after construction.
+func NewModelSelectorPlugin(pipeline *ms.ModelSelectorPipeline, datastore datalayer.Datastore) *ModelSelectorPlugin {
 	return &ModelSelectorPlugin{
 		typedName: plugin.TypedName{Type: ModelSelectorPluginType, Name: ModelSelectorPluginType},
-		selector:  ms.NewModelSelector(profile),
+		selector:  ms.NewModelSelector(pipeline),
 		datastore: datastore,
 	}
 }
@@ -96,14 +96,14 @@ func (p *ModelSelectorPlugin) ProcessRequest(ctx context.Context, cycleState *pl
 	return nil
 }
 
-// Profile returns the ModelSelectorProfile used by this plugin.
-func (p *ModelSelectorPlugin) Profile() *ms.ModelSelectorProfile {
-	return p.selector.Profile()
+// Pipeline returns the ModelSelectorPipeline used by this plugin.
+func (p *ModelSelectorPlugin) Pipeline() *ms.ModelSelectorPipeline {
+	return p.selector.Pipeline()
 }
 
-// AddPlugins adds the given plugins to the model selector profile.
+// AddPlugins adds the given plugins to the model selector pipeline.
 func (p *ModelSelectorPlugin) AddPlugins(plugins ...plugin.Plugin) error {
-	return p.selector.Profile().AddPlugins(plugins...)
+	return p.selector.Pipeline().AddPlugins(plugins...)
 }
 
 // loadCandidateModels reads all known models from the Datastore.

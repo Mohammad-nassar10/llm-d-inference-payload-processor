@@ -136,13 +136,13 @@ func TestTypedName(t *testing.T) {
 	}
 }
 
-// TestAddPluginsWiresScorer checks that a WeightedScorer added via AddPlugins appears in the profile.
+// TestAddPluginsWiresScorer checks that a WeightedScorer added via AddPlugins appears in the pipeline.
 func TestAddPluginsWiresScorer(t *testing.T) {
 	p := mustFactory(t, newFakeHandle("model-a", "model-b"))
 	scorer := costaware.NewCostScorer()
 	mustAddPlugins(t, p, ms.NewWeightedScorer(scorer, 2.0))
 
-	scorers := p.Profile().Scorers()
+	scorers := p.Pipeline().Scorers()
 	if len(scorers) != 1 || scorers[0].TypedName().Type != costaware.CostScorerType {
 		t.Errorf("expected one scorer of type %q, got %v", costaware.CostScorerType, scorers)
 	}
@@ -151,12 +151,12 @@ func TestAddPluginsWiresScorer(t *testing.T) {
 	}
 }
 
-// TestAddPluginsWiresPicker checks that a Picker added via AddPlugins is registered in the profile.
+// TestAddPluginsWiresPicker checks that a Picker added via AddPlugins is registered in the pipeline.
 func TestAddPluginsWiresPicker(t *testing.T) {
 	p := mustFactory(t, newFakeHandle("model-a"))
 	mustAddPlugins(t, p, maxscore.NewMaxScorePicker())
 
-	got := p.Profile().Picker()
+	got := p.Pipeline().Picker()
 	if got == nil || got.TypedName().Type != maxscore.MaxScorePickerType {
 		t.Errorf("expected picker type %q, got %v", maxscore.MaxScorePickerType, got)
 	}
@@ -208,11 +208,11 @@ func TestAddPluginsPluginImplementingBothScorerAndFilter(t *testing.T) {
 	p := mustFactory(t, newFakeHandle("model-a"))
 	mustAddPlugins(t, p, ms.NewWeightedScorer(dual, 1.0))
 
-	prof := p.Profile()
-	if len(prof.Filters()) != 1 || prof.Filters()[0].TypedName().Name != "dual" {
-		t.Errorf("expected dual in filters, got %v", prof.Filters())
+	pipeline := p.Pipeline()
+	if len(pipeline.Filters()) != 1 || pipeline.Filters()[0].TypedName().Name != "dual" {
+		t.Errorf("expected dual in filters, got %v", pipeline.Filters())
 	}
-	if len(prof.Scorers()) != 1 || prof.Scorers()[0].TypedName().Name != "dual" {
-		t.Errorf("expected dual in scorers, got %v", prof.Scorers())
+	if len(pipeline.Scorers()) != 1 || pipeline.Scorers()[0].TypedName().Name != "dual" {
+		t.Errorf("expected dual in scorers, got %v", pipeline.Scorers())
 	}
 }

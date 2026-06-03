@@ -34,7 +34,7 @@ import (
 )
 
 // compile-time interface validation
-var _ modelselector.ModelSelectorProfile = &ModelSelectorProfile{}
+var _ modelselector.ModelSelectorPipeline = &ModelSelectorPipeline{}
 
 const (
 	filterExtensionPoint = "ModelSelectorFilter"
@@ -42,48 +42,48 @@ const (
 	pickerExtensionPoint = "ModelSelectorPicker"
 )
 
-// NewModelSelectorProfile creates a new ModelSelectorProfile object and returns its pointer.
-func NewModelSelectorProfile() *ModelSelectorProfile {
-	return &ModelSelectorProfile{
+// NewModelSelectorPipeline creates a new ModelSelectorPipeline object and returns its pointer.
+func NewModelSelectorPipeline() *ModelSelectorPipeline {
+	return &ModelSelectorPipeline{
 		filters: []modelselector.Filter{},
 		scorers: []*WeightedScorer{},
 	}
 }
 
-// ModelSelectorProfile provides a profile configuration for the model-selector which influence model decisions.
-type ModelSelectorProfile struct {
+// ModelSelectorPipeline provides a pipeline configuration for the model-selector which influence model decisions.
+type ModelSelectorPipeline struct {
 	filters []modelselector.Filter
 	scorers []*WeightedScorer
 	picker  modelselector.Picker
 }
 
-// Filters returns the filter plugins registered in the profile.
-func (p *ModelSelectorProfile) Filters() []modelselector.Filter {
+// Filters returns the filter plugins registered in the pipeline.
+func (p *ModelSelectorPipeline) Filters() []modelselector.Filter {
 	return p.filters
 }
 
-// Scorers returns the weighted scorer plugins registered in the profile.
-func (p *ModelSelectorProfile) Scorers() []*WeightedScorer {
+// Scorers returns the weighted scorer plugins registered in the pipeline.
+func (p *ModelSelectorPipeline) Scorers() []*WeightedScorer {
 	return p.scorers
 }
 
-// Picker returns the picker plugin registered in the profile.
-func (p *ModelSelectorProfile) Picker() modelselector.Picker {
+// Picker returns the picker plugin registered in the pipeline.
+func (p *ModelSelectorPipeline) Picker() modelselector.Picker {
 	return p.picker
 }
 
 // WithPicker sets the given picker plugin as the Picker plugin.
-func (p *ModelSelectorProfile) WithPicker(picker modelselector.Picker) *ModelSelectorProfile {
+func (p *ModelSelectorPipeline) WithPicker(picker modelselector.Picker) *ModelSelectorPipeline {
 	p.picker = picker
 	return p
 }
 
-// AddPlugins adds the given plugins to the profile according to the interfaces each plugin implements.
+// AddPlugins adds the given plugins to the pipeline according to the interfaces each plugin implements.
 // A plugin may implement more than one interface.
 // Special Case: In order to add a scorer, one must use NewWeightedScorer in order to provide a weight.
 // If a scorer implements more than one interface, supplying a WeightedScorer is sufficient.
-func (p *ModelSelectorProfile) AddPlugins(pluginObjects ...plugin.Plugin) error {
-	// Validate all plugins before modifying state to avoid inconsistent profile
+func (p *ModelSelectorPipeline) AddPlugins(pluginObjects ...plugin.Plugin) error {
+	// Validate all plugins before modifying state to avoid inconsistent pipeline
 	var newFilters []modelselector.Filter
 	var newScorers []*WeightedScorer
 	var newPicker modelselector.Picker
@@ -119,7 +119,7 @@ func (p *ModelSelectorProfile) AddPlugins(pluginObjects ...plugin.Plugin) error 
 	return nil
 }
 
-func (p *ModelSelectorProfile) String() string {
+func (p *ModelSelectorPipeline) String() string {
 	filterNames := make([]string, len(p.filters))
 	for i, filter := range p.filters {
 		filterNames[i] = filter.TypedName().String()
@@ -142,8 +142,8 @@ func (p *ModelSelectorProfile) String() string {
 	)
 }
 
-// Run runs the ModelSelectorProfile pipeline: Filter → Score → Pick.
-func (p *ModelSelectorProfile) Run(ctx context.Context, request *requesthandling.InferenceRequest, cycleState *plugin.CycleState, candidateModels []datalayer.Model) (*modelselector.ProfileRunResult, error) {
+// Run runs the ModelSelectorPipeline: Filter → Score → Pick.
+func (p *ModelSelectorPipeline) Run(ctx context.Context, request *requesthandling.InferenceRequest, cycleState *plugin.CycleState, candidateModels []datalayer.Model) (*modelselector.PipelineRunResult, error) {
 	models := p.runFilterPlugins(ctx, request, cycleState, candidateModels)
 	if len(models) == 0 {
 		return nil, errors.New("no models available after filtering")
@@ -156,7 +156,7 @@ func (p *ModelSelectorProfile) Run(ctx context.Context, request *requesthandling
 	return result, nil
 }
 
-func (p *ModelSelectorProfile) runFilterPlugins(ctx context.Context, request *requesthandling.InferenceRequest, cycleState *plugin.CycleState, models []datalayer.Model) []datalayer.Model {
+func (p *ModelSelectorPipeline) runFilterPlugins(ctx context.Context, request *requesthandling.InferenceRequest, cycleState *plugin.CycleState, models []datalayer.Model) []datalayer.Model {
 	logger := log.FromContext(ctx)
 
 	// Cache loggers and check Enabled() once to avoid per-iteration allocations
@@ -194,7 +194,7 @@ func (p *ModelSelectorProfile) runFilterPlugins(ctx context.Context, request *re
 	return filteredModels
 }
 
-func (p *ModelSelectorProfile) runScorerPlugins(ctx context.Context, request *requesthandling.InferenceRequest, cycleState *plugin.CycleState, models []datalayer.Model) map[string]*modelselector.ScoredModel {
+func (p *ModelSelectorPipeline) runScorerPlugins(ctx context.Context, request *requesthandling.InferenceRequest, cycleState *plugin.CycleState, models []datalayer.Model) map[string]*modelselector.ScoredModel {
 	logger := log.FromContext(ctx)
 
 	// Cache loggers and check Enabled() once to avoid per-iteration allocations
@@ -235,7 +235,7 @@ func (p *ModelSelectorProfile) runScorerPlugins(ctx context.Context, request *re
 	return scoredModels
 }
 
-func (p *ModelSelectorProfile) runPickerPlugin(ctx context.Context, cycleState *plugin.CycleState, scoredModelMap map[string]*modelselector.ScoredModel) *modelselector.ProfileRunResult {
+func (p *ModelSelectorPipeline) runPickerPlugin(ctx context.Context, cycleState *plugin.CycleState, scoredModelMap map[string]*modelselector.ScoredModel) *modelselector.PipelineRunResult {
 	logger := log.FromContext(ctx)
 
 	// Cache loggers and check Enabled() once to avoid allocations from argument

@@ -52,8 +52,9 @@ func (p *fakeResponsePlugin) ProcessResponse(ctx context.Context, cycleState *pl
 
 var _ requesthandling.ResponseProcessor = &fakeResponsePlugin{}
 
-func newTestRequestContext() *RequestContext {
+func newTestRequestContext(profiles map[string]*requesthandling.Profile) *RequestContext {
 	return &RequestContext{
+		Profile:    profiles[testProfileName],
 		CycleState: plugin.NewCycleState(),
 		Request:    requesthandling.NewInferenceRequest(),
 		Response:   requesthandling.NewInferenceResponse(),
@@ -63,9 +64,10 @@ func newTestRequestContext() *RequestContext {
 func TestHandleResponseBody_NoPlugins(t *testing.T) {
 	ctx := logutil.NewTestLoggerIntoContext(context.Background())
 
-	server := NewServer([]requesthandling.RequestProcessor{}, []requesthandling.ResponseProcessor{})
+	profiles := newTestProfiles()
+	server := newServerForTest(profiles)
 	responseBody := []byte(`{"choices":[{"text":"Hello!"}]}`)
-	resp, err := server.HandleResponseBody(ctx, newTestRequestContext(), responseBody)
+	resp, err := server.HandleResponseBody(ctx, newTestRequestContext(profiles), responseBody)
 	if err != nil {
 		t.Fatalf("HandleResponseBody returned unexpected error: %v", err)
 	}
@@ -110,9 +112,11 @@ func TestHandleResponseBody_SinglePlugin(t *testing.T) {
 		},
 	}
 
-	server := NewServer([]requesthandling.RequestProcessor{}, []requesthandling.ResponseProcessor{mutatePlugin})
+	profiles := newTestProfiles()
+	withResponsePlugins(profiles, mutatePlugin)
+	server := newServerForTest(profiles)
 	responseBody := []byte(`{"choices":[{"text":"Hello!"}]}`)
-	resp, err := server.HandleResponseBody(ctx, newTestRequestContext(), responseBody)
+	resp, err := server.HandleResponseBody(ctx, newTestRequestContext(profiles), responseBody)
 	if err != nil {
 		t.Fatalf("HandleResponseBody returned unexpected error: %v", err)
 	}
@@ -148,9 +152,11 @@ func TestHandleResponseBody_MultiplePlugins(t *testing.T) {
 		},
 	}
 
-	server := NewServer([]requesthandling.RequestProcessor{}, []requesthandling.ResponseProcessor{plugin1, plugin2})
+	profiles := newTestProfiles()
+	withResponsePlugins(profiles, plugin1, plugin2)
+	server := newServerForTest(profiles)
 	responseBody := []byte(`{"original":true}`)
-	resp, err := server.HandleResponseBody(ctx, newTestRequestContext(), responseBody)
+	resp, err := server.HandleResponseBody(ctx, newTestRequestContext(profiles), responseBody)
 	if err != nil {
 		t.Fatalf("HandleResponseBody returned unexpected error: %v", err)
 	}
@@ -179,9 +185,11 @@ func TestHandleResponseBody_PluginError(t *testing.T) {
 		},
 	}
 
-	server := NewServer([]requesthandling.RequestProcessor{}, []requesthandling.ResponseProcessor{failingPlugin})
+	profiles := newTestProfiles()
+	withResponsePlugins(profiles, failingPlugin)
+	server := newServerForTest(profiles)
 	responseBody := []byte(`{"choices":[{"text":"some response"}]}`)
-	_, err := server.HandleResponseBody(ctx, newTestRequestContext(), responseBody)
+	_, err := server.HandleResponseBody(ctx, newTestRequestContext(profiles), responseBody)
 	if err == nil {
 		t.Fatal("HandleResponseBody should have returned an error")
 	}
@@ -202,9 +210,11 @@ func TestHandleResponseBody_StreamingWithPlugin(t *testing.T) {
 		},
 	}
 
-	server := NewServer([]requesthandling.RequestProcessor{}, []requesthandling.ResponseProcessor{mutatePlugin})
+	profiles := newTestProfiles()
+	withResponsePlugins(profiles, mutatePlugin)
+	server := newServerForTest(profiles)
 	responseBody := []byte(`{"choices":[{"text":"Hello!"}]}`)
-	resp, err := server.HandleResponseBody(ctx, newTestRequestContext(), responseBody)
+	resp, err := server.HandleResponseBody(ctx, newTestRequestContext(profiles), responseBody)
 	if err != nil {
 		t.Fatalf("HandleResponseBody returned unexpected error: %v", err)
 	}
@@ -272,8 +282,10 @@ func TestHandleResponseBody_PluginNoBodyMutation(t *testing.T) {
 		},
 	}
 
-	server := NewServer([]requesthandling.RequestProcessor{}, []requesthandling.ResponseProcessor{headerOnlyPlugin})
-	resp, err := server.HandleResponseBody(ctx, newTestRequestContext(), responseBody)
+	profiles := newTestProfiles()
+	withResponsePlugins(profiles, headerOnlyPlugin)
+	server := newServerForTest(profiles)
+	resp, err := server.HandleResponseBody(ctx, newTestRequestContext(profiles), responseBody)
 	if err != nil {
 		t.Fatalf("HandleResponseBody returned unexpected error: %v", err)
 	}

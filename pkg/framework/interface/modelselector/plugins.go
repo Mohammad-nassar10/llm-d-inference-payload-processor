@@ -42,5 +42,5 @@ type Scorer interface {
 // Picker picks the final model(s) to send the request to.
 type Picker interface {
 	plugin.Plugin
-	Pick(ctx context.Context, cycleState *plugin.CycleState, scoredModels []*ScoredModel) *ProfileRunResult
+	Pick(ctx context.Context, cycleState *plugin.CycleState, scoredModels []*ScoredModel) *PipelineRunResult
 }

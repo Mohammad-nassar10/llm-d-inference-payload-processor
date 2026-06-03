@@ -33,6 +33,7 @@ import (
 	"github.com/llm-d/llm-d-inference-payload-processor/pkg/framework/interface/requesthandling"
 	"github.com/llm-d/llm-d-inference-payload-processor/pkg/framework/plugins/requesthandling/basemodelextractor"
 	"github.com/llm-d/llm-d-inference-payload-processor/pkg/framework/plugins/requesthandling/bodyfieldtoheader"
+	"github.com/llm-d/llm-d-inference-payload-processor/pkg/framework/plugins/requesthandling/profilepicker/single"
 	runserver "github.com/llm-d/llm-d-inference-payload-processor/pkg/server"
 	"sigs.k8s.io/gateway-api-inference-extension/test/integration"
 )
@@ -114,8 +115,13 @@ func NewHarnessWithPlugins(
 	// 2. Configure payload processor server with plugins
 	runner := runserver.NewDefaultExtProcServerRunner(port)
 	runner.SecureServing = false
-	runner.RequestPlugins = requestPlugins
-	runner.ResponsePlugins = responsePlugins
+	runner.ProfilePicker = single.NewSingleProfilePicker()
+	runner.Profiles = map[string]*requesthandling.Profile{
+		"default": {
+			RequestPlugins:  requestPlugins,
+			ResponsePlugins: responsePlugins,
+		},
+	}
 
 	// 3. Start Server in Background
 	serverCtx, serverCancel := context.WithCancel(ctx)

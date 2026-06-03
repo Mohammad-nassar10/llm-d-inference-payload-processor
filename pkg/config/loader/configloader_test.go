@@ -32,6 +32,7 @@ import (
 	"github.com/llm-d/llm-d-inference-payload-processor/pkg/framework/interface/plugin"
 	"github.com/llm-d/llm-d-inference-payload-processor/pkg/framework/interface/requesthandling"
 	"github.com/llm-d/llm-d-inference-payload-processor/pkg/framework/plugins/datalayer/notificationsource"
+	"github.com/llm-d/llm-d-inference-payload-processor/pkg/framework/plugins/datalayer/pollingsource"
 	"github.com/llm-d/llm-d-inference-payload-processor/pkg/framework/plugins/modelselector/picker/maxscore"
 	"github.com/llm-d/llm-d-inference-payload-processor/pkg/framework/plugins/modelselector/scorer/costaware"
 	"github.com/llm-d/llm-d-inference-payload-processor/pkg/framework/plugins/requesthandling/basemodelextractor"
@@ -53,6 +54,7 @@ const (
 	testScorerType       = "test-scorer"
 )
 
+// TestLoadRawConfiguration verifies that YAML config text is parsed into the expected PayloadProcessorConfig structure.
 func TestLoadRawConfiguration(t *testing.T) {
 	t.Parallel()
 
@@ -141,6 +143,7 @@ func TestLoadRawConfiguration(t *testing.T) {
 	}
 }
 
+// TestInstantiatePlugins verifies that plugins declared in config are correctly instantiated via the registry.
 func TestInstantiatePlugins(t *testing.T) {
 	// Not parallel because it modifies global plugin registry.
 	registerTestPlugins(t)
@@ -323,7 +326,8 @@ func TestBuildProfiles(t *testing.T) {
 	}
 }
 
-func TestBuildDatalayer(t *testing.T) {
+// TestBuildNotificationSources verifies that notification source plugins are resolved and built from config refs.
+func TestBuildNotificationSources(t *testing.T) {
 	// Not parallel because it modifies global plugin registry.
 	plugin.Register(notificationsource.PluginType, notificationsource.Factory)
 	registerTestPlugins(t)
@@ -367,7 +371,64 @@ func TestBuildDatalayer(t *testing.T) {
 			err = instantiatePlugins(rawConfig.Plugins, handle)
 			require.NoError(t, err, "setup: instantiatePlugins failed")
 
-			sources, err := buildDatalayer(rawConfig.NotificationSources, handle)
+			sources, err := buildNotificationSources(rawConfig.NotificationSources, handle)
+
+			if tc.wantErr {
+				require.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
+			require.Len(t, sources, tc.wantLen)
+		})
+	}
+}
+
+// TestBuildPollingSources verifies that polling source plugins are resolved and built from config refs.
+func TestBuildPollingSources(t *testing.T) {
+	// Not parallel because it modifies global plugin registry.
+	plugin.Register(pollingsource.PluginType, pollingsource.Factory)
+	registerTestPlugins(t)
+
+	tests := []struct {
+		name       string
+		configText string
+		wantLen    int
+		wantErr    bool
+	}{
+		{
+			name:       "Success - no polling sources",
+			configText: successConfigText,
+			wantLen:    0,
+		},
+		{
+			name:       "Success - valid polling source ref",
+			configText: pollingSourceSuccessConfigText,
+			wantLen:    1,
+		},
+		{
+			name:       "Error - missing plugin ref",
+			configText: pollingSourceMissingRefConfigText,
+			wantErr:    true,
+		},
+		{
+			name:       "Error - plugin is not a PollingSource",
+			configText: pollingSourceWrongTypeConfigText,
+			wantErr:    true,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			logger := logging.NewTestLogger()
+
+			rawConfig, err := loadRawConfiguration([]byte(tc.configText), logger)
+			require.NoError(t, err, "setup: loadRawConfiguration failed")
+
+			handle := plugin.NewHandle(context.Background(), nil, nil)
+			err = instantiatePlugins(rawConfig.Plugins, handle)
+			require.NoError(t, err, "setup: instantiatePlugins failed")
+
+			sources, err := buildPollingSources(rawConfig.PollingSources, handle)
 
 			if tc.wantErr {
 				require.Error(t, err)
@@ -444,7 +505,7 @@ type mockPicker struct{ mockPlugin }
 // compile-time type assertion
 var _ modelselector.Picker = &mockPicker{}
 
-func (m *mockPicker) Pick(ctx context.Context, cycleState *plugin.CycleState, scoredModels []*modelselector.ScoredModel) *modelselector.ProfileRunResult {
+func (m *mockPicker) Pick(ctx context.Context, cycleState *plugin.CycleState, scoredModels []*modelselector.ScoredModel) *modelselector.PipelineRunResult {
 	return nil
 }
 
@@ -543,10 +604,10 @@ func TestBuildProfilesModelSelectorPlugins(t *testing.T) {
 
 	// The model-selector plugin's internal profile must have received the wired plugins.
 	msPlugin := profile.RequestPlugins[0].(*modelselectorplugin.ModelSelectorPlugin)
-	msProfile := msPlugin.Profile()
-	require.Len(t, msProfile.Filters(), 1, "model-selector profile must have one filter")
-	require.Len(t, msProfile.Scorers(), 1, "model-selector profile must have one scorer")
-	require.NotNil(t, msProfile.Picker(), "model-selector profile must have a picker")
+	msPipeline := msPlugin.Pipeline()
+	require.Len(t, msPipeline.Filters(), 1, "model-selector pipeline must have one filter")
+	require.Len(t, msPipeline.Scorers(), 1, "model-selector pipeline must have one scorer")
+	require.NotNil(t, msPipeline.Picker(), "model-selector pipeline must have a picker")
 }
 
 func TestBuildProfilesScorerMissingWeight(t *testing.T) {

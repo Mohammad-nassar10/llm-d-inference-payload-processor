@@ -45,7 +45,8 @@ import (
 	"github.com/llm-d/llm-d-inference-payload-processor/pkg/framework/interface/plugin"
 	"github.com/llm-d/llm-d-inference-payload-processor/pkg/framework/interface/requesthandling"
 	notificationsource "github.com/llm-d/llm-d-inference-payload-processor/pkg/framework/plugins/datalayer/notificationsource"
-	"github.com/llm-d/llm-d-inference-payload-processor/pkg/framework/plugins/datalayer/requestmetadata"
+	"github.com/llm-d/llm-d-inference-payload-processor/pkg/framework/plugins/datalayer/pollingsource"
+	requestmetadata "github.com/llm-d/llm-d-inference-payload-processor/pkg/framework/plugins/datalayer/requestmetadata"
 	"github.com/llm-d/llm-d-inference-payload-processor/pkg/framework/plugins/modelselector/picker/maxscore"
 	"github.com/llm-d/llm-d-inference-payload-processor/pkg/framework/plugins/modelselector/picker/random"
 	"github.com/llm-d/llm-d-inference-payload-processor/pkg/framework/plugins/modelselector/picker/weightedrandom"
@@ -64,8 +65,7 @@ var setupLog = ctrl.Log.WithName("setup")
 func NewRunner() *Runner {
 	return &Runner{
 		payloadProcessorExecutableName: "payload-processor",
-		requestPlugins:                 []requesthandling.RequestProcessor{},
-		responsePlugins:                []requesthandling.ResponseProcessor{},
+		profiles:                       map[string]*requesthandling.Profile{},
 		customCollectors:               []prometheus.Collector{},
 	}
 }
@@ -73,15 +73,14 @@ func NewRunner() *Runner {
 // Runner is used to run payload processor with its plugins
 type Runner struct {
 	payloadProcessorExecutableName string
-	// request processing plugin instances executed by the request handler,
-	// in the same order the plugin flags are provided.
-	requestPlugins []requesthandling.RequestProcessor
-	// response processing plugin instances executed by the response handler,
-	// in the same order the plugin flags are provided.
-	responsePlugins []requesthandling.ResponseProcessor
+	// profilePicker is the profile picker instantiated as specified in the configuration
+	profilePicker requesthandling.ProfilePicker
+	// profiles is the set of named profiles loaded from the configuration
+	profiles map[string]*requesthandling.Profile
 
 	customCollectors    []prometheus.Collector
 	notificationSources []datasource.NotificationSource
+	pollingSources      []datasource.PollingSource
 }
 
 // WithExecutableName sets the name of the executable containing the runner.
@@ -194,18 +193,27 @@ func (r *Runner) Run(ctx context.Context) error {
 			return err
 		}
 	}
+	for _, src := range r.pollingSources {
+		if err := src.Start(ctx); err != nil {
+			setupLog.Error(err, "failed to start polling source", "name", src.TypedName().Name)
+			return err
+		}
+	}
 	defer func() {
 		for _, src := range r.notificationSources {
+			src.Stop()
+		}
+		for _, src := range r.pollingSources {
 			src.Stop()
 		}
 	}()
 
 	// Setup ExtProc Server Runner.
 	serverRunner := &runserver.ExtProcServerRunner{
-		GrpcPort:        opts.GRPCPort,
-		SecureServing:   opts.SecureServing,
-		RequestPlugins:  r.requestPlugins,
-		ResponsePlugins: r.responsePlugins,
+		GrpcPort:      opts.GRPCPort,
+		SecureServing: opts.SecureServing,
+		ProfilePicker: r.profilePicker,
+		Profiles:      r.profiles,
 	}
 	if len(r.notificationSources) > 0 {
 		serverRunner.EventNotifier = r.notificationSources[0]
@@ -255,17 +263,10 @@ func (r *Runner) loadConfiguration(ctx context.Context, opts *runserver.Options,
 		return err
 	}
 
-	// Hack for now until the ProfilePicker is supported
-	var profileName = ""
-	for name := range theConfig.Profiles {
-		profileName = name
-		break
-	}
-	logger.Info("Running with", "profile", profileName)
-
-	r.requestPlugins = theConfig.Profiles[profileName].RequestPlugins
-	r.responsePlugins = theConfig.Profiles[profileName].ResponsePlugins
+	r.profilePicker = theConfig.ProfilePicker
+	r.profiles = theConfig.Profiles
 	r.notificationSources = theConfig.NotificationSources
+	r.pollingSources = theConfig.PollingSources
 
 	return nil
 }
@@ -277,6 +278,7 @@ func (r *Runner) registerInTreePlugins() {
 	plugin.Register(basemodelextractor.BaseModelToHeaderPluginType, basemodelextractor.BaseModelToHeaderPluginFactory)
 	plugin.Register(requestmetadata.PluginType, requestmetadata.ExtractorFactory)
 	plugin.Register(notificationsource.PluginType, notificationsource.Factory)
+	plugin.Register(pollingsource.PluginType, pollingsource.Factory)
 	// register model selector plugins
 	plugin.Register(random.RandomPickerType, random.RandomPickerFactory)
 	plugin.Register(maxscore.MaxScorePickerType, maxscore.MaxScorePickerFactory)

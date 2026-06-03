@@ -31,25 +31,25 @@ import (
 	"github.com/llm-d/llm-d-inference-payload-processor/pkg/metrics"
 )
 
-// NewModelSelector creates a new ModelSelector with the given profile.
-func NewModelSelector(profile *ModelSelectorProfile) *ModelSelector {
+// NewModelSelector creates a new ModelSelector with the given pipeline.
+func NewModelSelector(pipeline *ModelSelectorPipeline) *ModelSelector {
 	return &ModelSelector{
-		profile: profile,
+		pipeline: pipeline,
 	}
 }
 
-// ModelSelector selects the best model for a request by running a single ModelSelectorProfile.
+// ModelSelector selects the best model for a request by running a single ModelSelectorPipeline.
 type ModelSelector struct {
-	profile *ModelSelectorProfile
+	pipeline *ModelSelectorPipeline
 }
 
-// Profile returns the ModelSelectorProfile used by this selector.
-func (s *ModelSelector) Profile() *ModelSelectorProfile {
-	return s.profile
+// Pipeline returns the ModelSelectorPipeline used by this selector.
+func (s *ModelSelector) Pipeline() *ModelSelectorPipeline {
+	return s.pipeline
 }
 
 // Select runs the model selection pipeline (Filter → Score → Pick) and returns the selected model.
-func (s *ModelSelector) Select(ctx context.Context, request *requesthandling.InferenceRequest, cycleState *plugin.CycleState, candidateModels []datalayer.Model) (result *modelselector.ProfileRunResult, err error) {
+func (s *ModelSelector) Select(ctx context.Context, request *requesthandling.InferenceRequest, cycleState *plugin.CycleState, candidateModels []datalayer.Model) (result *modelselector.PipelineRunResult, err error) {
 	logger := log.FromContext(ctx)
 	logger.V(logutil.VERBOSE).Info("Starting model selection", "candidateModels", len(candidateModels))
 
@@ -64,7 +64,7 @@ func (s *ModelSelector) Select(ctx context.Context, request *requesthandling.Inf
 		return nil, err
 	}
 
-	result, err = s.profile.Run(ctx, request, cycleState, candidateModels)
+	result, err = s.pipeline.Run(ctx, request, cycleState, candidateModels)
 	if err != nil {
 		logger.V(logutil.VERBOSE).Info("Model selection failed", "error", err.Error())
 		return nil, err

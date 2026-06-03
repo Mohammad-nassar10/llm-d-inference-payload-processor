@@ -148,7 +148,8 @@ func TestHandleRequestHeaders(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			server := NewServer([]requesthandling.RequestProcessor{}, []requesthandling.ResponseProcessor{})
+			profiles := newTestProfiles()
+			server := newServerForTest(profiles)
 			reqCtx := &RequestContext{
 				Request: requesthandling.NewInferenceRequest(),
 			}
@@ -477,7 +478,9 @@ func TestHandleRequestBody_BuiltInPlugins(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			modelToHeaderPlugin, _ := bodyfieldtoheader.NewBodyFieldToHeaderPlugin(modelField, bodyfieldtoheader.ModelHeader)
-			server := NewServer([]requesthandling.RequestProcessor{modelToHeaderPlugin, baseModelToHeaderPlugin}, []requesthandling.ResponseProcessor{})
+			profiles := newTestProfiles()
+			addRequestPlugins(profiles, modelToHeaderPlugin, baseModelToHeaderPlugin)
+			server := newServerForTest(profiles)
 			reqCtx := &RequestContext{
 				CycleState: plugin.NewCycleState(),
 				Request:    requesthandling.NewInferenceRequest(),
@@ -525,7 +528,9 @@ func TestHandleRequestBodyWithPluginMetrics(t *testing.T) {
 
 	modelToHeaderPlugin, _ := bodyfieldtoheader.NewBodyFieldToHeaderPlugin(modelField, bodyfieldtoheader.ModelHeader)
 	baseModelToHeaderPlugin := &basemodelextractor.BaseModelToHeaderPlugin{AdaptersStore: basemodelextractor.NewAdaptersStore()}
-	server := NewServer([]requesthandling.RequestProcessor{modelToHeaderPlugin, baseModelToHeaderPlugin}, []requesthandling.ResponseProcessor{})
+	profiles := newTestProfiles()
+	addRequestPlugins(profiles, modelToHeaderPlugin, baseModelToHeaderPlugin)
+	server := newServerForTest(profiles)
 	reqCtx := &RequestContext{
 		CycleState: plugin.NewCycleState(),
 		Request:    requesthandling.NewInferenceRequest(),
@@ -796,7 +801,9 @@ func TestHandleRequestBody_MultiPluginHeaderMutations(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			server := NewServer(tc.plugins, []requesthandling.ResponseProcessor{})
+			profiles := newTestProfiles()
+			addRequestPlugins(profiles, tc.plugins...)
+			server := newServerForTest(profiles)
 			reqCtx := &RequestContext{
 				Request:    requesthandling.NewInferenceRequest(),
 				CycleState: plugin.NewCycleState(),
@@ -949,7 +956,9 @@ func TestHandleRequestBody_BodyMutation(t *testing.T) {
 	}
 
 	baseModelPlugin := &basemodelextractor.BaseModelToHeaderPlugin{AdaptersStore: basemodelextractor.NewAdaptersStore()}
-	server := NewServer([]requesthandling.RequestProcessor{bodyPlugin, baseModelPlugin}, []requesthandling.ResponseProcessor{})
+	profiles := newTestProfiles()
+	addRequestPlugins(profiles, bodyPlugin, baseModelPlugin)
+	server := newServerForTest(profiles)
 	reqCtx := &RequestContext{
 		CycleState: plugin.NewCycleState(),
 		Request:    requesthandling.NewInferenceRequest(),

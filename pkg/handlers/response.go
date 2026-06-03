@@ -73,7 +73,7 @@ func (s *Server) HandleResponseBody(ctx context.Context, reqCtx *RequestContext,
 	}
 
 	logger := log.FromContext(ctx)
-	if len(s.responsePlugins) == 0 {
+	if len(reqCtx.Profile.ResponsePlugins) == 0 {
 		return s.generateEmptyResponseBodyResponse(responseBodyBytes), nil
 	}
 
@@ -82,7 +82,7 @@ func (s *Server) HandleResponseBody(ctx context.Context, reqCtx *RequestContext,
 		return s.generateEmptyResponseBodyResponse(responseBodyBytes), nil
 	}
 
-	if err := s.runResponsePlugins(ctx, reqCtx.CycleState, reqCtx.Response); err != nil {
+	if err := s.runResponsePlugins(ctx, reqCtx.CycleState, reqCtx.Response, reqCtx.Profile.ResponsePlugins); err != nil {
 		return nil, err
 	}
 
@@ -145,7 +145,7 @@ func (s *Server) HandleResponseTrailers(trailers *eppb.HttpTrailers) ([]*eppb.Pr
 }
 
 // runResponsePlugins executes response plugins in the order they were registered.
-func (s *Server) runResponsePlugins(ctx context.Context, cycleState *plugin.CycleState, response *requesthandling.InferenceResponse) error {
+func (s *Server) runResponsePlugins(ctx context.Context, cycleState *plugin.CycleState, response *requesthandling.InferenceResponse, respPlugins []requesthandling.ResponseProcessor) error {
 	logger := log.FromContext(ctx).V(logutil.DEFAULT)
 
 	// Cache verbose logger and check Enabled() once to avoid per-iteration
@@ -154,15 +154,15 @@ func (s *Server) runResponsePlugins(ctx context.Context, cycleState *plugin.Cycl
 	verboseEnabled := verboseLogger.Enabled()
 
 	var err error
-	for _, plugin := range s.responsePlugins {
+	for _, respPlugin := range respPlugins {
 		if verboseEnabled {
-			verboseLogger.Info("Executing response plugin", "plugin", plugin.TypedName())
+			verboseLogger.Info("Executing response plugin", "plugin", respPlugin.TypedName())
 		}
 		before := time.Now()
-		err = plugin.ProcessResponse(ctx, cycleState, response)
-		metrics.RecordPluginProcessingLatency(responsePluginExtensionPoint, plugin.TypedName().Type, plugin.TypedName().Name, time.Since(before))
+		err = respPlugin.ProcessResponse(ctx, cycleState, response)
+		metrics.RecordPluginProcessingLatency(responsePluginExtensionPoint, respPlugin.TypedName().Type, respPlugin.TypedName().Name, time.Since(before))
 		if err != nil {
-			logger.Error(err, "Failed to execute response plugin", "plugin", plugin.TypedName())
+			logger.Error(err, "Failed to execute response plugin", "plugin", respPlugin.TypedName())
 			return err
 		}
 	}

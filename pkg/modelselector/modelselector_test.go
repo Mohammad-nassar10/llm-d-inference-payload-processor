@@ -70,12 +70,12 @@ func TestSelect(t *testing.T) {
 			}
 			picker := &testPicker{typedName: plugin.TypedName{Type: "test-picker", Name: "max-score"}}
 
-			profile := NewModelSelectorProfile().WithPicker(picker)
-			if err := profile.AddPlugins(NewWeightedScorer(scorer, 1.0)); err != nil {
+			pipeline := NewModelSelectorPipeline().WithPicker(picker)
+			if err := pipeline.AddPlugins(NewWeightedScorer(scorer, 1.0)); err != nil {
 				t.Fatalf("AddPlugins failed: %v", err)
 			}
 
-			selector := NewModelSelector(profile)
+			selector := NewModelSelector(pipeline)
 
 			result, err := selector.Select(context.Background(), requesthandling.NewInferenceRequest(), plugin.NewCycleState(), tt.models)
 
@@ -134,12 +134,12 @@ func TestSelectWithFilterAndScorer(t *testing.T) {
 
 	picker := &testPicker{typedName: plugin.TypedName{Type: "test-picker", Name: "max-score"}}
 
-	profile := NewModelSelectorProfile().WithPicker(picker)
-	if err := profile.AddPlugins(filter, NewWeightedScorer(scorer, 1.0)); err != nil {
+	pipeline := NewModelSelectorPipeline().WithPicker(picker)
+	if err := pipeline.AddPlugins(filter, NewWeightedScorer(scorer, 1.0)); err != nil {
 		t.Fatalf("AddPlugins failed: %v", err)
 	}
 
-	selector := NewModelSelector(profile)
+	selector := NewModelSelector(pipeline)
 
 	result, err := selector.Select(context.Background(), requesthandling.NewInferenceRequest(), plugin.NewCycleState(), []datalayer.Model{modelA, modelB, modelC})
 	if err != nil {

@@ -68,7 +68,12 @@ func (s *Server) HandleRequestBody(ctx context.Context, reqCtx *RequestContext, 
 		return nil, errcommon.Error{Code: errcommon.BadRequest, Msg: fmt.Sprintf("failed to parse request body: %v", err)}
 	}
 
-	if err := s.runRequestPlugins(ctx, reqCtx.CycleState, reqCtx.Request); err != nil {
+	var err error
+	reqCtx.Profile, err = s.profilePicker.Pick(ctx, reqCtx.CycleState, reqCtx.Request, s.profiles)
+	if err != nil {
+		return nil, errcommon.Error{Code: errcommon.Internal, Msg: fmt.Sprintf("failed to pick a profile: %v", err)}
+	}
+	if err := s.runRequestPlugins(ctx, reqCtx.CycleState, reqCtx.Request, reqCtx.Profile.RequestPlugins); err != nil {
 		return nil, err
 	}
 
@@ -119,7 +124,8 @@ func (s *Server) HandleRequestBody(ctx context.Context, reqCtx *RequestContext, 
 }
 
 // runRequestPlugins executes request plugins in the order they were registered.
-func (s *Server) runRequestPlugins(ctx context.Context, cycleState *plugin.CycleState, request *requesthandling.InferenceRequest) error {
+func (s *Server) runRequestPlugins(ctx context.Context, cycleState *plugin.CycleState, request *requesthandling.InferenceRequest,
+	reqPlugins []requesthandling.RequestProcessor) error {
 	logger := log.FromContext(ctx).V(logutil.DEFAULT)
 
 	// Cache verbose logger and check Enabled() once to avoid per-iteration
@@ -127,16 +133,15 @@ func (s *Server) runRequestPlugins(ctx context.Context, cycleState *plugin.Cycle
 	verboseLogger := logger.V(logutil.VERBOSE)
 	verboseEnabled := verboseLogger.Enabled()
 
-	var err error
-	for _, plugin := range s.requestPlugins {
+	for _, reqPlugin := range reqPlugins {
 		if verboseEnabled {
-			verboseLogger.Info("Executing request plugin", "plugin", plugin.TypedName())
+			verboseLogger.Info("Executing request plugin", "plugin", reqPlugin.TypedName())
 		}
 		before := time.Now()
-		err = plugin.ProcessRequest(ctx, cycleState, request)
-		metrics.RecordPluginProcessingLatency(requestPluginExtensionPoint, plugin.TypedName().Type, plugin.TypedName().Name, time.Since(before))
+		err := reqPlugin.ProcessRequest(ctx, cycleState, request)
+		metrics.RecordPluginProcessingLatency(requestPluginExtensionPoint, reqPlugin.TypedName().Type, reqPlugin.TypedName().Name, time.Since(before))
 		if err != nil {
-			logger.Error(err, "Failed to execute request plugin", "plugin", plugin.TypedName())
+			logger.Error(err, "Failed to execute request plugin", "plugin", reqPlugin.TypedName())
 			return err
 		}
 	}

@@ -66,7 +66,7 @@ func (p *MaxScorePicker) TypedName() plugin.TypedName {
 }
 
 // Pick selects the model with the highest score.
-func (p *MaxScorePicker) Pick(ctx context.Context, _ *plugin.CycleState, scoredModels []*modelselector.ScoredModel) *modelselector.ProfileRunResult {
+func (p *MaxScorePicker) Pick(ctx context.Context, _ *plugin.CycleState, scoredModels []*modelselector.ScoredModel) *modelselector.PipelineRunResult {
 	if debugLogger := log.FromContext(ctx).V(logutil.DEBUG); debugLogger.Enabled() {
 		debugLogger.Info("selecting model from candidates by max score", "numCandidates", len(scoredModels),
 			"scoredModels", scoredModels)
@@ -85,5 +85,5 @@ func (p *MaxScorePicker) Pick(ctx context.Context, _ *plugin.CycleState, scoredM
 		return 0
 	})
 
-	return &modelselector.ProfileRunResult{TargetModel: scoredModels[0].Model}
+	return &modelselector.PipelineRunResult{TargetModel: scoredModels[0].Model}
 }

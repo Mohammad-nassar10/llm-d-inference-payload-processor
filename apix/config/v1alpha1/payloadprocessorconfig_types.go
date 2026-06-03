@@ -66,6 +66,10 @@ type PayloadProcessorConfig struct {
 	// +optional
 	// NotificationSources is an optional list of references to notification-source plugins to start.
 	NotificationSources []PluginRef `json:"notificationSources,omitempty"`
+
+	// +optional
+	// PollingSources is an optional list of references to polling-source plugins to start.
+	PollingSources []PluginRef `json:"pollingSources,omitempty"`
 }
 
 func (cfg PayloadProcessorConfig) String() string {
@@ -85,6 +89,9 @@ func (cfg PayloadProcessorConfig) String() string {
 	}
 	if len(cfg.NotificationSources) > 0 {
 		fmt.Fprintf(contents, ", NotificationSources: %v", cfg.NotificationSources)
+	}
+	if len(cfg.PollingSources) > 0 {
+		fmt.Fprintf(contents, ", PollingSources: %v", cfg.PollingSources)
 	}
 
 	return "{" + contents.String() + "}"
