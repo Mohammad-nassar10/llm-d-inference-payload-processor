@@ -42,7 +42,7 @@ import (
 	"github.com/llm-d/llm-d-inference-payload-processor/pkg/framework/interface/datalayer"
 	"github.com/llm-d/llm-d-inference-payload-processor/pkg/framework/interface/plugin"
 	"github.com/llm-d/llm-d-inference-payload-processor/pkg/framework/interface/requesthandling"
-	inflightscorer "github.com/llm-d/llm-d-inference-payload-processor/pkg/framework/plugins/modelselector/scorer/inflightrequests"
+	avgttftscorer "github.com/llm-d/llm-d-inference-payload-processor/pkg/framework/plugins/modelselector/scorer/avgttft"
 	notificationsource "github.com/llm-d/llm-d-inference-payload-processor/pkg/framework/plugins/datalayer/notificationsource"
 	requestmetadata "github.com/llm-d/llm-d-inference-payload-processor/pkg/framework/plugins/datalayer/requestmetadata"
 	"github.com/llm-d/llm-d-inference-payload-processor/pkg/framework/plugins/modelselector/picker/maxscore"
@@ -251,7 +251,7 @@ func (r *Runner) Run(ctx context.Context) error {
 
 	// Build the model selection pipeline: InflightRequestsScorer → MaxScorePicker.
 	profile := modelselectorsvc.NewModelSelectorProfile().
-		WithScorers(modelselectorsvc.NewWeightedScorer(inflightscorer.NewInflightRequestsScorer(), 1.0)).
+		WithScorers(modelselectorsvc.NewWeightedScorer(avgttftscorer.NewAvgTTFTScorer(), 1.0)).
 		WithPicker(maxscore.NewMaxScorePicker())
 
 	candidateModels := func() []datalayer.Model {
@@ -305,6 +305,7 @@ func (r *Runner) registerInTreePlugins() {
 	plugin.Register(random.RandomPickerType, random.RandomPickerFactory)
 	plugin.Register(maxscore.MaxScorePickerType, maxscore.MaxScorePickerFactory)
 	plugin.Register(weightedrandom.WeightedRandomPickerType, weightedrandom.WeightedRandomPickerFactory)
+	plugin.Register(avgttftscorer.PluginType, avgttftscorer.ScorerFactory)
 
 }
 

@@ -115,6 +115,7 @@ func (s *Server) HandleRequestBody(ctx context.Context, reqCtx *RequestContext, 
 		reqCtx.Request.SetHeader(contentLengthHeader, strconv.Itoa(len(requestBodyBytes)))
 	}
 
+	reqCtx.RequestSentTimestamp = time.Now()
 	metrics.RecordSuccessCounter()
 
 	ret = append(ret, &eppb.ProcessingResponse{

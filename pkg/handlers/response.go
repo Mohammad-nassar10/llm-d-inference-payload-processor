@@ -21,6 +21,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strconv"
+	"strings"
 	"time"
 
 	eppb "github.com/envoyproxy/go-control-plane/envoy/service/ext_proc/v3"
@@ -62,7 +63,19 @@ func (s *Server) HandleResponseHeaders(ctx context.Context, reqCtx *RequestConte
 func (s *Server) HandleResponseBody(ctx context.Context, reqCtx *RequestContext, responseBodyBytes []byte) ([]*eppb.ProcessingResponse, error) {
 	reqCtx.ResponseCompleteTimestamp = time.Now()
 
-	// Notify the data layer of the completed response.
+	logger := log.FromContext(ctx)
+	if err := json.Unmarshal(responseBodyBytes, &reqCtx.Response.Body); err != nil {
+		// Streaming responses arrive as SSE (data: {...}\n\n). Try to extract
+		// the last JSON chunk which vLLM places the usage field in.
+		if body := parseSSEBody(responseBodyBytes); body != nil {
+			reqCtx.Response.Body = body
+		} else {
+			logger.V(logutil.VERBOSE).Info("response body is not JSON or SSE, skipping response plugins")
+		}
+	}
+
+	// Notify the data layer after the body is parsed so extractors can read Response.Body fields
+	// (e.g. usage.completion_tokens for TPOT).
 	if s.eventNotifier != nil {
 		s.eventNotifier.Notify(datasource.Event{
 			Type: datasource.ResponseEventType,
@@ -70,17 +83,12 @@ func (s *Server) HandleResponseBody(ctx context.Context, reqCtx *RequestContext,
 				Request:  reqCtx.Request,
 				Response: reqCtx.Response,
 				Duration: reqCtx.ResponseCompleteTimestamp.Sub(reqCtx.RequestReceivedTimestamp),
+				TTFT:     reqCtx.ResponseFirstChunkTimestamp.Sub(reqCtx.RequestSentTimestamp),
 			},
 		})
 	}
 
-	logger := log.FromContext(ctx)
-	if len(s.responsePlugins) == 0 {
-		return s.generateEmptyResponseBodyResponse(reqCtx, responseBodyBytes), nil
-	}
-
-	if err := json.Unmarshal(responseBodyBytes, &reqCtx.Response.Body); err != nil {
-		logger.Error(err, "Failed to parse response body as JSON, skipping response plugins")
+	if len(s.responsePlugins) == 0 || reqCtx.Response.Body == nil {
 		return s.generateEmptyResponseBodyResponse(reqCtx, responseBodyBytes), nil
 	}
 
@@ -136,6 +144,29 @@ func (s *Server) generateEmptyResponseBodyResponse(reqCtx *RequestContext, respo
 		})
 	}
 	return envoy.AddStreamedResponseBody(responses, responseBodyBytes)
+}
+
+// parseSSEBody scans an SSE stream (data: {...}\n\n) and returns the body map
+// from the last non-[DONE] data line, or nil if none can be parsed.
+// vLLM places the usage field in the final data chunk before [DONE].
+func parseSSEBody(b []byte) map[string]any {
+	const prefix = "data: "
+	var last map[string]any
+	for _, line := range strings.Split(string(b), "\n") {
+		line = strings.TrimSpace(line)
+		if !strings.HasPrefix(line, prefix) {
+			continue
+		}
+		payload := line[len(prefix):]
+		if payload == "[DONE]" {
+			continue
+		}
+		var chunk map[string]any
+		if json.Unmarshal([]byte(payload), &chunk) == nil {
+			last = chunk
+		}
+	}
+	return last
 }
 
 // HandleResponseTrailers handles response trailers.

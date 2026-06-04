@@ -74,7 +74,7 @@ image-build: ## Build container image for local development
 		--build-arg COMMIT_SHA=$(GIT_COMMIT_SHA) \
 		--build-arg BUILD_REF=$(BUILD_REF) \
 		--tag $(IMAGE):$(VERSION) \
-		--tag $(IMAGE):ipptest \
+		--tag $(IMAGE):ipptest-ttft \
 		.
 
 .PHONY: image-push

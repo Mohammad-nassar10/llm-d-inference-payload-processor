@@ -82,11 +82,13 @@ type Server struct {
 
 // RequestContext stores context information during the lifetime of an HTTP request.
 type RequestContext struct {
-	RequestReceivedTimestamp  time.Time
-	ResponseCompleteTimestamp time.Time
-	CycleState                *plugin.CycleState
-	Request                   *requesthandling.InferenceRequest
-	Response                  *requesthandling.InferenceResponse
+	RequestReceivedTimestamp    time.Time
+	RequestSentTimestamp        time.Time
+	ResponseFirstChunkTimestamp time.Time
+	ResponseCompleteTimestamp   time.Time
+	CycleState                  *plugin.CycleState
+	Request                     *requesthandling.InferenceRequest
+	Response                    *requesthandling.InferenceResponse
 	// ResponseHeadersDeferred is true when HandleResponseHeaders returned nil (deferred the
 	// ResponseHeaders ext-proc response to be sent from the body processing phase).
 	// Used to gate whether body handlers should include a ResponseHeaders response.
@@ -163,10 +165,14 @@ func (s *Server) Process(srv extProcPb.ExternalProcessor_ProcessServer) error {
 			loggerVerbose.Info("processing response headers complete")
 		case *extProcPb.ProcessingRequest_ResponseBody:
 			loggerVerbose.Info("Incoming response body chunk", "EoS", v.ResponseBody.EndOfStream)
+			if reqCtx.ResponseFirstChunkTimestamp.IsZero() {
+				reqCtx.ResponseFirstChunkTimestamp = time.Now()
+			}
 			responseBody = append(responseBody, v.ResponseBody.Body...)
 			if !v.ResponseBody.EndOfStream {
 				continue
 			}
+			reqCtx.ResponseCompleteTimestamp = time.Now()
 			responses, err = s.HandleResponseBody(ctx, reqCtx, responseBody)
 			loggerVerbose.Info("processing response body complete")
 		case *extProcPb.ProcessingRequest_ResponseTrailers:

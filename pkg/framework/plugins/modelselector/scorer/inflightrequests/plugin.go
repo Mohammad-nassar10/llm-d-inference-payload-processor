@@ -110,7 +110,7 @@ func inflightRequestCount(model datalayer.Model) int64 {
 	if !ok {
 		return 0
 	}
-	rc, ok := val.(requestmetadata.RequestMetadataCount)
+	rc, ok := val.(requestmetadata.ModelMetrics)
 	if !ok {
 		return 0
 	}
