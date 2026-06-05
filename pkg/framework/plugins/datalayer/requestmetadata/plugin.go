@@ -19,6 +19,7 @@ package requestmetadata
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"time"
 
 	"github.com/llm-d/llm-d-inference-payload-processor/pkg/framework/interface/datalayer"
@@ -46,9 +47,37 @@ const (
 // compile-time interface assertion
 var _ dlsrc.Extractor = &RequestMetadataExtractor{}
 
+// RequestMetadataExtractorConfig holds the JSON-configurable parameters for the extractor.
+type RequestMetadataExtractorConfig struct {
+	// EmaAlpha is the smoothing factor for the EMA of TTFT and TPOT. Must be in (0,1].
+	// Defaults to 0.1 if not specified.
+	EmaAlpha float64 `json:"emaAlpha,omitempty"`
+	// IntervalDuration is the aggregation interval before an EMA update is applied (e.g. "5s", "1m").
+	// Defaults to "5s" if not specified.
+	IntervalDuration string `json:"intervalDuration,omitempty"`
+}
+
 // ExtractorFactory creates a RequestMetadataExtractor wired to the shared DataStore.
-func ExtractorFactory(name string, _ json.RawMessage, h plugin.Handle) (plugin.Plugin, error) {
-	return NewRequestMetadataExtractor(h.Datastore()).WithName(name), nil
+func ExtractorFactory(name string, rawParameters json.RawMessage, h plugin.Handle) (plugin.Plugin, error) {
+	config := RequestMetadataExtractorConfig{
+		EmaAlpha:         defaultEmaAlpha,
+		IntervalDuration: defaultIntervalDuration.String(),
+	}
+	if len(rawParameters) > 0 {
+		if err := json.Unmarshal(rawParameters, &config); err != nil {
+			return nil, fmt.Errorf("failed to parse parameters for plugin %q: %w", name, err)
+		}
+	}
+
+	intervalDuration, err := time.ParseDuration(config.IntervalDuration)
+	if err != nil {
+		return nil, fmt.Errorf("invalid intervalDuration %q for plugin %q: %w", config.IntervalDuration, name, err)
+	}
+
+	return NewRequestMetadataExtractor(h.Datastore()).
+		WithName(name).
+		WithEmaAlpha(config.EmaAlpha).
+		WithIntervalDuration(intervalDuration), nil
 }
 
 // ModelMetrics holds per-model metadata: in-flight request count and
@@ -75,14 +104,14 @@ type modelIntervalAccumulator struct {
 }
 
 // flush averages the accumulated interval observations into the EMA, emits Prometheus gauges, and resets the interval.
-func (s *modelIntervalAccumulator) flush(now time.Time, model string) {
+func (s *modelIntervalAccumulator) flush(now time.Time, model string, alpha float64) {
 	if s.ttftN > 0 {
-		s.AvgTTFT = ema(s.AvgTTFT, s.ttftSum/float64(s.ttftN))
+		s.AvgTTFT = ema(s.AvgTTFT, s.ttftSum/float64(s.ttftN), alpha)
 		s.LastObservedAt = now.UnixNano()
 		metrics.RecordModelAvgTTFT(model, s.AvgTTFT)
 	}
 	if s.tpotN > 0 {
-		s.AvgTPOT = ema(s.AvgTPOT, s.tpotSum/float64(s.tpotN))
+		s.AvgTPOT = ema(s.AvgTPOT, s.tpotSum/float64(s.tpotN), alpha)
 		metrics.RecordModelAvgTPOT(model, s.AvgTPOT)
 	}
 	s.intervalStart = now
@@ -104,6 +133,7 @@ type RequestMetadataExtractor struct {
 	ds               datalayer.Datastore
 	state            map[string]*modelIntervalAccumulator
 	intervalDuration time.Duration
+	emaAlpha         float64
 }
 
 func NewRequestMetadataExtractor(ds datalayer.Datastore) *RequestMetadataExtractor {
@@ -112,6 +142,7 @@ func NewRequestMetadataExtractor(ds datalayer.Datastore) *RequestMetadataExtract
 		ds:               ds,
 		state:            make(map[string]*modelIntervalAccumulator),
 		intervalDuration: defaultIntervalDuration,
+		emaAlpha:         defaultEmaAlpha,
 	}
 }
 
@@ -127,6 +158,12 @@ func (e *RequestMetadataExtractor) WithName(name string) *RequestMetadataExtract
 // (useful in unit tests where real time cannot advance between calls).
 func (e *RequestMetadataExtractor) WithIntervalDuration(d time.Duration) *RequestMetadataExtractor {
 	e.intervalDuration = d
+	return e
+}
+
+// WithEmaAlpha overrides the EMA smoothing factor.
+func (e *RequestMetadataExtractor) WithEmaAlpha(alpha float64) *RequestMetadataExtractor {
+	e.emaAlpha = alpha
 	return e
 }
 
@@ -179,7 +216,7 @@ func (e *RequestMetadataExtractor) Extract(_ context.Context, events []dlsrc.Eve
 			// Once the interval has elapsed, average all accumulated observations and apply one EMA update.
 			// intervalDuration=0 means flush after every response (used in unit tests).
 			if now.Sub(s.intervalStart) >= e.intervalDuration {
-				s.flush(now, model)
+				s.flush(now, model, e.emaAlpha)
 			}
 			updated[model] = true
 		}
@@ -200,13 +237,13 @@ func (e *RequestMetadataExtractor) getOrCreateModelIntervalAccumulator(model str
 	return s
 }
 
-// ema applies an exponential moving average update with α = defaultEmaAlpha.
+// ema applies an exponential moving average update.
 // If current is zero (no prior observation), the new value is returned directly.
-func ema(current, newValue float64) float64 {
+func ema(current, newValue, alpha float64) float64 {
 	if current == 0 {
 		return newValue
 	}
-	return defaultEmaAlpha*newValue + (1-defaultEmaAlpha)*current
+	return alpha*newValue + (1-alpha)*current
 }
 
 // floorDecrement decrements v by delta, flooring at zero.
