@@ -348,3 +348,52 @@ func TestExtractorFactoryWiresDatastore(t *testing.T) {
 		t.Errorf("expected name %q, got %q", "my-extractor", ext.TypedName().Name)
 	}
 }
+
+func TestExtractorFactoryAppliesConfig(t *testing.T) {
+	ds := datastore.NewFakeDataStore()
+	h := &fakeHandle{ds: ds}
+
+	p, err := ExtractorFactory("my-extractor", json.RawMessage(`{"emaAlpha":0.2,"intervalDuration":"10s"}`), h)
+	if err != nil {
+		t.Fatalf("ExtractorFactory returned error: %v", err)
+	}
+
+	ext, ok := p.(*RequestMetadataExtractor)
+	if !ok {
+		t.Fatalf("expected *RequestMetadataExtractor, got %T", p)
+	}
+	if ext.emaAlpha != 0.2 {
+		t.Errorf("expected emaAlpha=0.2, got %f", ext.emaAlpha)
+	}
+	if ext.intervalDuration != 10*time.Second {
+		t.Errorf("expected intervalDuration=10s, got %s", ext.intervalDuration)
+	}
+}
+
+func TestExtractorFactoryDefaultsApplied(t *testing.T) {
+	ds := datastore.NewFakeDataStore()
+	h := &fakeHandle{ds: ds}
+
+	p, err := ExtractorFactory("my-extractor", json.RawMessage(`{}`), h)
+	if err != nil {
+		t.Fatalf("ExtractorFactory returned error: %v", err)
+	}
+
+	ext := p.(*RequestMetadataExtractor)
+	if ext.emaAlpha != defaultEmaAlpha {
+		t.Errorf("expected default emaAlpha=%f, got %f", defaultEmaAlpha, ext.emaAlpha)
+	}
+	if ext.intervalDuration != defaultIntervalDuration {
+		t.Errorf("expected default intervalDuration=%s, got %s", defaultIntervalDuration, ext.intervalDuration)
+	}
+}
+
+func TestExtractorFactoryInvalidIntervalDuration(t *testing.T) {
+	ds := datastore.NewFakeDataStore()
+	h := &fakeHandle{ds: ds}
+
+	_, err := ExtractorFactory("my-extractor", json.RawMessage(`{"intervalDuration":"not-a-duration"}`), h)
+	if err == nil {
+		t.Fatal("expected error for invalid intervalDuration, got nil")
+	}
+}
