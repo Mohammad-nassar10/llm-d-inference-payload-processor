@@ -66,7 +66,7 @@ func (s *Server) WithEventNotifier(n datasource.EventNotifier) *Server {
 type Server struct {
 	profilePicker requesthandling.ProfilePicker
 	profiles      map[string]*requesthandling.Profile
-  eventNotifier   datasource.EventNotifier
+	eventNotifier datasource.EventNotifier
 }
 
 // RequestContext stores context information during the lifetime of an HTTP request.

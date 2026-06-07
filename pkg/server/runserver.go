@@ -40,7 +40,7 @@ type ExtProcServerRunner struct {
 	SecureServing bool
 	ProfilePicker requesthandling.ProfilePicker
 	Profiles      map[string]*requesthandling.Profile
-  EventNotifier   datasource.EventNotifier
+	EventNotifier datasource.EventNotifier
 }
 
 func NewDefaultExtProcServerRunner(port int) *ExtProcServerRunner {

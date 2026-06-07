@@ -198,9 +198,6 @@ func (r *Runner) Run(ctx context.Context) error {
 		ProfilePicker: r.profilePicker,
 		Profiles:      r.profiles,
 	}
-	if len(r.notificationSources) > 0 {
-		serverRunner.EventNotifier = r.notificationSources[0]
-	}
 
 	// Register health server.
 	if err := registerHealthServer(mgr, opts.GRPCHealthPort); err != nil {
