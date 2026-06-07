@@ -20,6 +20,7 @@ import (
 	"context"
 	"encoding/json"
 	"math"
+	"time"
 
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
@@ -30,7 +31,12 @@ import (
 	requestmetadata "github.com/llm-d/llm-d-inference-payload-processor/pkg/framework/plugins/datalayer/requestmetadata"
 )
 
-const PluginType = "avg-ttft-scorer"
+const (
+	PluginType = "avg-ttft-scorer"
+
+	// stalenessThreshold is the duration after which an unupdated AvgTTFT EMA is considered stale.
+	stalenessThreshold = 30 * time.Second
+)
 
 // compile-time interface assertion
 var _ modelselector.Scorer = &AvgTTFTScorer{}
@@ -62,13 +68,17 @@ func (s *AvgTTFTScorer) WithName(name string) *AvgTTFTScorer {
 
 // Score returns a score in [0,1] for each model.
 // Formula: score = (max - avgTTFT) / (max - min)
+// avgTTFT applies a staleness decay to AvgTTFT when the EMA has not been
+// updated recently and the model has few in-flight requests, allowing models
+// that have recovered from saturation to regain a competitive score.
 func (s *AvgTTFTScorer) Score(ctx context.Context, _ *plugin.CycleState, _ *requesthandling.InferenceRequest, models []datalayer.Model) map[datalayer.Model]float64 {
+	now := time.Now()
 	ttfts := make(map[datalayer.Model]float64, len(models))
 	minTTFT := math.MaxFloat64
 	maxTTFT := 0.0
 
 	for _, model := range models {
-		v := avgTTFT(model)
+		v := avgTTFT(model, now)
 		ttfts[model] = v
 		if v > maxTTFT {
 			maxTTFT = v
@@ -89,20 +99,42 @@ func (s *AvgTTFTScorer) Score(ctx context.Context, _ *plugin.CycleState, _ *requ
 
 	logger := log.FromContext(ctx)
 	for _, model := range models {
-		logger.Info("avg-ttft score", "model", model.GetName(), "avgTTFT", ttfts[model], "avgTPOT", avgTPOT(model), "score", scores[model])
+		logger.Info("avg-ttft score", "model", model.GetName(), "avgTTFT", ttfts[model], "avgTPOT", modelMetrics(model).AvgTPOT, "score", scores[model])
 	}
 
 	return scores
 }
 
-// avgTTFT returns the AvgTTFT for a model, or 0 if not yet observed.
-func avgTTFT(model datalayer.Model) float64 {
-	return modelMetrics(model).AvgTTFT
-}
+// avgTTFT returns a decay-adjusted AvgTTFT for scoring.
+// When the EMA is stale and the model has few in-flight requests, the returned
+// value is smoothly reduced toward 0 so the model regains a competitive score.
+//
+// decay  = staleness × idleness
+// result = AvgTTFT × (1 - decay)
+//
+// staleness = min(elapsed / stalenessThreshold, 1.0), grows to 1 over threshold
+// idleness  = 1 / (1 + Requests), 1.0 when idle, drops under load
+func avgTTFT(model datalayer.Model, now time.Time) float64 {
+	val, ok := model.GetAttributes().Get(requestmetadata.RequestMetadataAttributeKey)
+	if !ok {
+		return 0
+	}
+	rc, ok := val.(requestmetadata.ModelMetrics)
+	if !ok {
+		return 0
+	}
+	if rc.AvgTTFT == 0 {
+		return 0
+	}
 
-// avgTPOT returns the AvgTPOT for a model, or 0 if not yet observed.
-func avgTPOT(model datalayer.Model) float64 {
-	return modelMetrics(model).AvgTPOT
+	staleness := 0.0
+	if rc.LastObservedAt > 0 {
+		elapsed := now.Sub(time.Unix(0, rc.LastObservedAt))
+		staleness = math.Min(float64(elapsed)/float64(stalenessThreshold), 1.0)
+	}
+	idleness := 1.0 / (1.0 + float64(rc.Requests))
+	decay := staleness * idleness
+	return rc.AvgTTFT * (1 - decay)
 }
 
 // modelMetrics returns the ModelMetrics for a model, or a zero value if not yet observed.
