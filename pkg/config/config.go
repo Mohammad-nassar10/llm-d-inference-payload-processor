@@ -17,7 +17,6 @@ limitations under the License.
 package config
 
 import (
-	"github.com/llm-d/llm-d-inference-payload-processor/pkg/framework/interface/datalayer/datasource"
 	"github.com/llm-d/llm-d-inference-payload-processor/pkg/framework/interface/requesthandling"
 )
 
@@ -36,10 +35,4 @@ type Config struct {
 	// PostProcessors are the response processing plugin instances executed by the response handler,
 	// in the same order provided in the configuration file.
 	PostProcessors []requesthandling.PostProcessor
-
-	// NotificationSources are the notification-source plugin instances to start.
-	NotificationSources []datasource.NotificationSource
-
-	// PollingSources are the polling-source plugin instances to start.
-	PollingSources []datasource.PollingSource
 }

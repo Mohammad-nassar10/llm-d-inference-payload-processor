@@ -38,6 +38,7 @@ func (f *fakeHandle) Context() context.Context                         { return 
 func (f *fakeHandle) Client() client.Client                            { return nil }
 func (f *fakeHandle) ReconcilerBuilder() *ctrlbuilder.Builder          { return nil }
 func (f *fakeHandle) Datastore() datalayer.Datastore                   { return f.ds }
+func (f *fakeHandle) EventNotifier() datalayer.EventNotifier           { return nil }
 func (f *fakeHandle) Plugin(name string) plugin.Plugin                 { return nil }
 func (f *fakeHandle) AddPlugin(name string, plugin plugin.Plugin)      {}
 func (f *fakeHandle) GetAllPlugins() []plugin.Plugin                   { return nil }

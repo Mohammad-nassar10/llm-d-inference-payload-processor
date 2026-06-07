@@ -54,5 +54,5 @@ type PostProcessor interface {
 	plugin.Plugin
 
 	// PostProcess is invoked to post-process requests after the response plugins of the selected profile run.
-	PostProcess(ctx context.Context, cycleState *plugin.CycleState, request *InferenceRequest) error
+	PostProcess(ctx context.Context, cycleState *plugin.CycleState, response *InferenceResponse) error
 }

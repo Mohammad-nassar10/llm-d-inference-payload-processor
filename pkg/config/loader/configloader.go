@@ -45,7 +45,7 @@ func init() {
 	utilruntime.Must(configapi.Install(scheme))
 }
 
-func LoadConfiguration(configBytes []byte, handle plugin.Handle, logger logr.Logger) (*config.Config, error) {
+func LoadConfiguration(configBytes []byte, handle plugin.Handle, processor datasource.DatalayerProcessor, logger logr.Logger) (*config.Config, error) {
 	rawConfig, err := loadRawConfiguration(configBytes, logger)
 	if err != nil {
 		return nil, err
@@ -74,59 +74,74 @@ func LoadConfiguration(configBytes []byte, handle plugin.Handle, logger logr.Log
 		return nil, err
 	}
 
-	notificationSources, err := buildNotificationSources(rawConfig.NotificationSources, handle)
+	preProcessors, err := buildPreProcessors(rawConfig.PreProcessing, handle)
 	if err != nil {
-		logger.Error(err, "failed to load one or more notification sources")
+		logger.Error(err, "failed to load one or more pre-processors")
 		return nil, err
 	}
 
-	pollingSources, err := buildPollingSources(rawConfig.PollingSources, handle)
+	postProcessors, err := buildPostProcessors(rawConfig.PostProcessing, handle)
 	if err != nil {
-		logger.Error(err, "failed to load one or more polling sources")
+		logger.Error(err, "failed to load one or more post-processors")
+		return nil, err
 	}
+
+	if err = buildDatalayerSources(rawConfig.Datalayer, handle, processor); err != nil {
+		logger.Error(err, "failed to load one or more datalayer sources")
+		return nil, err
+	}
+
 	if err = buildModelSelector(profiles, handle); err != nil {
 		logger.Error(err, "failed to build model selector profiles")
 		return nil, err
 	}
 
 	return &config.Config{
-		ProfilePicker:       profilePicker,
-		Profiles:            profiles,
-		NotificationSources: notificationSources,
-		PollingSources:      pollingSources,
+		ProfilePicker:  profilePicker,
+		Profiles:       profiles,
+		PreProcessors:  preProcessors,
+		PostProcessors: postProcessors,
 	}, nil
 }
 
-func buildNotificationSources(refs []configapi.PluginRef, handle plugin.Handle) ([]datasource.NotificationSource, error) {
-	sources := make([]datasource.NotificationSource, 0, len(refs))
-	for _, ref := range refs {
+func buildDatalayerSources(cfg *configapi.DatalayerConfig, handle plugin.Handle, processor datasource.DatalayerProcessor) error {
+	if cfg == nil {
+		return nil
+	}
+	for _, ref := range cfg.Collectors {
 		p := handle.Plugin(ref.PluginRef)
 		if p == nil {
-			return nil, fmt.Errorf("there is no plugin named %s", ref.PluginRef)
+			return fmt.Errorf("there is no plugin named %s", ref.PluginRef)
 		}
-		src, ok := p.(datasource.NotificationSource)
+		c, ok := p.(datasource.Collector)
 		if !ok {
-			return nil, fmt.Errorf("the plugin named %s is not a NotificationSource", ref.PluginRef)
+			return fmt.Errorf("plugin %q is not a Collector", ref.PluginRef)
 		}
-		sources = append(sources, src)
+		processor.RegisterCollector(c, c.CollectorFrequency())
 	}
-	return sources, nil
-}
-
-func buildPollingSources(refs []configapi.PluginRef, handle plugin.Handle) ([]datasource.PollingSource, error) {
-	sources := make([]datasource.PollingSource, 0, len(refs))
-	for _, ref := range refs {
+	for _, ref := range cfg.Extractors {
 		p := handle.Plugin(ref.PluginRef)
 		if p == nil {
-			return nil, fmt.Errorf("there is no plugin named %s", ref.PluginRef)
+			return fmt.Errorf("there is no plugin named %s", ref.PluginRef)
 		}
-		src, ok := p.(datasource.PollingSource)
+		e, ok := p.(datasource.Extractor)
 		if !ok {
-			return nil, fmt.Errorf("the plugin named %s is not a PollingSource", ref.PluginRef)
+			return fmt.Errorf("plugin %q is not an Extractor", ref.PluginRef)
 		}
-		sources = append(sources, src)
+		processor.RegisterExtractor(e)
 	}
-	return sources, nil
+	for _, ref := range cfg.Datasources {
+		p := handle.Plugin(ref.PluginRef)
+		if p == nil {
+			return fmt.Errorf("there is no plugin named %s", ref.PluginRef)
+		}
+		d, ok := p.(datasource.DataSource)
+		if !ok {
+			return fmt.Errorf("plugin %q is not a DataSource", ref.PluginRef)
+		}
+		processor.RegisterDatasource(d)
+	}
+	return nil
 }
 
 func loadRawConfiguration(configBytes []byte, logger logr.Logger) (*configapi.PayloadProcessorConfig, error) {
@@ -246,6 +261,50 @@ func buildProfiles(rawProfiles []configapi.Profile, handle plugin.Handle) (map[s
 	}
 
 	return profiles, nil
+}
+
+func buildPreProcessors(rawConfig *configapi.PluginRefList, handle plugin.Handle) ([]requesthandling.PreProcessor, error) {
+	if rawConfig == nil || len(rawConfig.Plugins) == 0 {
+		return []requesthandling.PreProcessor{}, nil
+	}
+
+	preProcessors := make([]requesthandling.PreProcessor, len(rawConfig.Plugins))
+
+	for idx, pluginRef := range rawConfig.Plugins {
+		rawPlugin := handle.Plugin(pluginRef.PluginRef)
+		if rawPlugin == nil {
+			return nil, fmt.Errorf("the referenced pre-processor plugin %s doesn't exist in the configuration", pluginRef.PluginRef)
+		}
+		if preProcessor, ok := rawPlugin.(requesthandling.PreProcessor); ok {
+			preProcessors[idx] = preProcessor
+		} else {
+			return nil, fmt.Errorf("the referenced plugin %s is not a pre-processor", pluginRef.PluginRef)
+		}
+	}
+
+	return preProcessors, nil
+}
+
+func buildPostProcessors(rawConfig *configapi.PluginRefList, handle plugin.Handle) ([]requesthandling.PostProcessor, error) {
+	if rawConfig == nil || len(rawConfig.Plugins) == 0 {
+		return []requesthandling.PostProcessor{}, nil
+	}
+
+	postProcessors := make([]requesthandling.PostProcessor, len(rawConfig.Plugins))
+
+	for idx, pluginRef := range rawConfig.Plugins {
+		rawPlugin := handle.Plugin(pluginRef.PluginRef)
+		if rawPlugin == nil {
+			return nil, fmt.Errorf("the referenced post-processor plugin %s doesn't exist in the configuration", pluginRef.PluginRef)
+		}
+		if postProcessor, ok := rawPlugin.(requesthandling.PostProcessor); ok {
+			postProcessors[idx] = postProcessor
+		} else {
+			return nil, fmt.Errorf("the referenced plugin %s is not a post-processor", pluginRef.PluginRef)
+		}
+	}
+
+	return postProcessors, nil
 }
 
 // buildModelSelector iterates all built profiles and, for each model-selector plugin found in
