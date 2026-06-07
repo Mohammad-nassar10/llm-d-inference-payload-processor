@@ -58,15 +58,19 @@ type RequestMetadataExtractorConfig struct {
 }
 
 // ExtractorFactory creates a RequestMetadataExtractor wired to the shared DataStore.
-func ExtractorFactory(name string, rawParameters json.RawMessage, h plugin.Handle) (plugin.Plugin, error) {
+func ExtractorFactory(name string, parameters json.RawMessage, h plugin.Handle) (plugin.Plugin, error) {
 	config := RequestMetadataExtractorConfig{
 		EmaAlpha:         defaultEmaAlpha,
 		IntervalDuration: defaultIntervalDuration.String(),
 	}
-	if len(rawParameters) > 0 {
-		if err := json.Unmarshal(rawParameters, &config); err != nil {
+	if len(parameters) > 0 {
+		if err := json.Unmarshal(parameters, &config); err != nil {
 			return nil, fmt.Errorf("failed to parse parameters for plugin %q: %w", name, err)
 		}
+	}
+
+	if config.EmaAlpha <= 0 || config.EmaAlpha > 1 {
+		return nil, fmt.Errorf("invalid emaAlpha %v for plugin %q: must be in (0, 1]", config.EmaAlpha, name)
 	}
 
 	intervalDuration, err := time.ParseDuration(config.IntervalDuration)
