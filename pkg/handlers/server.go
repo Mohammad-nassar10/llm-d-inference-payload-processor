@@ -86,6 +86,7 @@ type RequestContext struct {
 	RequestSentTimestamp        time.Time
 	ResponseFirstChunkTimestamp time.Time
 	ResponseCompleteTimestamp   time.Time
+	responseChunkCount          int
 	CycleState                  *plugin.CycleState
 	Request                     *requesthandling.InferenceRequest
 	Response                    *requesthandling.InferenceResponse
@@ -164,16 +165,39 @@ func (s *Server) Process(srv extProcPb.ExternalProcessor_ProcessServer) error {
 			responses = s.HandleResponseHeaders(ctx, reqCtx, v.ResponseHeaders)
 			loggerVerbose.Info("processing response headers complete")
 		case *extProcPb.ProcessingRequest_ResponseBody:
-			loggerVerbose.Info("Incoming response body chunk", "EoS", v.ResponseBody.EndOfStream)
 			if reqCtx.ResponseFirstChunkTimestamp.IsZero() {
 				reqCtx.ResponseFirstChunkTimestamp = time.Now()
+				loggerVerbose.Info("Incoming response body chunk", "EoS", v.ResponseBody.EndOfStream, "chunk", 1)
+			} else {
+				reqCtx.responseChunkCount++
+				loggerVerbose.Info("Incoming response body chunk", "EoS", v.ResponseBody.EndOfStream, "chunk", reqCtx.responseChunkCount+1)
 			}
 			responseBody = append(responseBody, v.ResponseBody.Body...)
 			if !v.ResponseBody.EndOfStream {
+				// In STREAMED mode Envoy requires an acknowledgement for every chunk.
+				// Send a pass-through immediately and keep accumulating for final processing.
+				if sendErr := srv.Send(&extProcPb.ProcessingResponse{
+					Response: &extProcPb.ProcessingResponse_ResponseBody{
+						ResponseBody: &extProcPb.BodyResponse{},
+					},
+				}); sendErr != nil {
+					return status.Errorf(codes.Unknown, "failed to send streaming response ack: %v", sendErr)
+				}
 				continue
 			}
 			reqCtx.ResponseCompleteTimestamp = time.Now()
 			responses, err = s.HandleResponseBody(ctx, reqCtx, responseBody)
+			// In STREAMED mode all preceding chunks were already forwarded to the
+			// client via their pass-through acks. Return a pass-through for the
+			// final chunk too — sending the full accumulated body here would
+			// duplicate the already-forwarded bytes and break transfer encoding.
+			if reqCtx.responseChunkCount > 0 {
+				responses = []*extProcPb.ProcessingResponse{
+					{Response: &extProcPb.ProcessingResponse_ResponseBody{
+						ResponseBody: &extProcPb.BodyResponse{},
+					}},
+				}
+			}
 			loggerVerbose.Info("processing response body complete")
 		case *extProcPb.ProcessingRequest_ResponseTrailers:
 			responses, err = s.HandleResponseTrailers(v.ResponseTrailers)

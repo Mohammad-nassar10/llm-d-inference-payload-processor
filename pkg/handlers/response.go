@@ -17,11 +17,12 @@ limitations under the License.
 package handlers
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strconv"
-	"strings"
 	"time"
 
 	eppb "github.com/envoyproxy/go-control-plane/envoy/service/ext_proc/v3"
@@ -46,10 +47,9 @@ func (s *Server) HandleResponseHeaders(ctx context.Context, reqCtx *RequestConte
 
 	if !headers.GetEndOfStream() {
 		log.FromContext(ctx).V(logutil.VERBOSE).Info("captured response headers, deferring response until body arrives...")
-		reqCtx.ResponseHeadersDeferred = true
-		return nil
 	}
-	// EndOfStream means no body is expected, return HeadersResponse immediately
+	// Always respond to response headers so Envoy proceeds with body chunks.
+	// In STREAMED/FULL_DUPLEX_STREAMED mode, Envoy blocks until we respond.
 	return []*eppb.ProcessingResponse{
 		{
 			Response: &eppb.ProcessingResponse_ResponseHeaders{
@@ -66,13 +66,24 @@ func (s *Server) HandleResponseBody(ctx context.Context, reqCtx *RequestContext,
 	logger := log.FromContext(ctx)
 	if err := json.Unmarshal(responseBodyBytes, &reqCtx.Response.Body); err != nil {
 		// Streaming responses arrive as SSE (data: {...}\n\n). Try to extract
-		// the last JSON chunk which vLLM places the usage field in.
-		if body := parseSSEBody(responseBodyBytes); body != nil {
-			reqCtx.Response.Body = body
+		// usage/model fields by parsing the SSE event stream.
+		if sseBody, sseErr := parseSSEResponseBody(responseBodyBytes); sseErr == nil && sseBody != nil {
+			reqCtx.Response.Body = sseBody
+			logger.V(logutil.VERBOSE).Info("parsed SSE response body for response plugins")
 		} else {
 			logger.V(logutil.VERBOSE).Info("response body is not JSON or SSE, skipping response plugins")
 		}
 	}
+
+	ttft := reqCtx.ResponseFirstChunkTimestamp.Sub(reqCtx.RequestSentTimestamp)
+	duration := reqCtx.ResponseCompleteTimestamp.Sub(reqCtx.RequestReceivedTimestamp)
+	decodeTime := duration - ttft
+	logger.Info("response timing",
+		"chunks", reqCtx.responseChunkCount+1,
+		"ttft", ttft.Seconds(),
+		"decodeTime", decodeTime.Seconds(),
+		"totalDuration", duration.Seconds(),
+	)
 
 	// Notify the data layer after the body is parsed so extractors can read Response.Body fields
 	// (e.g. usage.completion_tokens for TPOT).
@@ -82,8 +93,8 @@ func (s *Server) HandleResponseBody(ctx context.Context, reqCtx *RequestContext,
 			Payload: datasource.ResponsePayload{
 				Request:  reqCtx.Request,
 				Response: reqCtx.Response,
-				Duration: reqCtx.ResponseCompleteTimestamp.Sub(reqCtx.RequestReceivedTimestamp),
-				TTFT:     reqCtx.ResponseFirstChunkTimestamp.Sub(reqCtx.RequestSentTimestamp),
+				Duration: duration,
+				TTFT:     ttft,
 			},
 		})
 	}
@@ -146,27 +157,71 @@ func (s *Server) generateEmptyResponseBodyResponse(reqCtx *RequestContext, respo
 	return envoy.AddStreamedResponseBody(responses, responseBodyBytes)
 }
 
-// parseSSEBody scans an SSE stream (data: {...}\n\n) and returns the body map
-// from the last non-[DONE] data line, or nil if none can be parsed.
-// vLLM places the usage field in the final data chunk before [DONE].
-func parseSSEBody(b []byte) map[string]any {
-	const prefix = "data: "
-	var last map[string]any
-	for _, line := range strings.Split(string(b), "\n") {
-		line = strings.TrimSpace(line)
-		if !strings.HasPrefix(line, prefix) {
-			continue
+// parseSSEResponseBody extracts a composite response body from an SSE (Server-Sent Events)
+// stream. It parses by SSE event boundaries instead of individual lines because one logical
+// event may legally contain multiple consecutive `data:` lines that must be joined before
+// JSON decoding. It merges usage and model fields from all events into a single map that
+// response plugins can process, supporting both Anthropic (top-level usage) and OpenAI
+// (nested in response) formats.
+func parseSSEResponseBody(body []byte) (map[string]any, error) {
+	result := map[string]any{}
+	lines := bytes.Split(body, []byte("\n"))
+	eventDataLines := make([][]byte, 0)
+
+	flushEvent := func() {
+		if len(eventDataLines) == 0 {
+			return
 		}
-		payload := line[len(prefix):]
-		if payload == "[DONE]" {
-			continue
+		data := bytes.Join(eventDataLines, []byte("\n"))
+		eventDataLines = eventDataLines[:0]
+		data = bytes.TrimSpace(data)
+		if len(data) == 0 || bytes.Equal(data, []byte("[DONE]")) {
+			return
 		}
-		var chunk map[string]any
-		if json.Unmarshal([]byte(payload), &chunk) == nil {
-			last = chunk
+		var event map[string]any
+		if err := json.Unmarshal(data, &event); err != nil {
+			return
+		}
+		if model, ok := event["model"].(string); ok && model != "" {
+			result["model"] = model
+		}
+		// Check for usage at top level (Anthropic) or nested in response (OpenAI Responses API)
+		usage, _ := event["usage"].(map[string]any)
+		if usage == nil {
+			if resp, ok := event["response"].(map[string]any); ok {
+				usage, _ = resp["usage"].(map[string]any)
+				if m, ok := resp["model"].(string); ok && m != "" {
+					result["model"] = m
+				}
+			}
+		}
+		if usage != nil {
+			existing, _ := result["usage"].(map[string]any)
+			if existing == nil {
+				existing = map[string]any{}
+			}
+			for k, v := range usage {
+				existing[k] = v
+			}
+			result["usage"] = existing
 		}
 	}
-	return last
+
+	for _, line := range lines {
+		if bytes.HasPrefix(line, []byte("data: ")) {
+			eventDataLines = append(eventDataLines, line[len("data: "):])
+		} else if len(bytes.TrimSpace(line)) == 0 {
+			// Blank line signals end of one SSE event.
+			flushEvent()
+		}
+		// Other SSE fields (id:, event:, retry:) are ignored.
+	}
+	flushEvent() // flush any trailing event not terminated by a blank line
+
+	if len(result) == 0 {
+		return nil, errors.New("no parseable SSE data events found")
+	}
+	return result, nil
 }
 
 // HandleResponseTrailers handles response trailers.
