@@ -36,7 +36,7 @@ const (
 	PluginType = "avg-ttft-scorer"
 
 	// stalenessThreshold is the duration after which an unupdated AvgTTFT EMA is considered stale.
-	stalenessThreshold = 30 * time.Second
+	stalenessThreshold = 10 * time.Second
 )
 
 // compile-time interface assertion

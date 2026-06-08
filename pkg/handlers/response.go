@@ -17,8 +17,10 @@ limitations under the License.
 package handlers
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strconv"
 	"time"
@@ -28,6 +30,7 @@ import (
 
 	envoy "github.com/llm-d/llm-d-inference-payload-processor/pkg/common/envoy"
 	logutil "github.com/llm-d/llm-d-inference-payload-processor/pkg/common/observability/logging"
+	datasource "github.com/llm-d/llm-d-inference-payload-processor/pkg/framework/interface/datalayer/datasource"
 	"github.com/llm-d/llm-d-inference-payload-processor/pkg/framework/interface/plugin"
 	"github.com/llm-d/llm-d-inference-payload-processor/pkg/framework/interface/requesthandling"
 	"github.com/llm-d/llm-d-inference-payload-processor/pkg/metrics"
@@ -44,9 +47,9 @@ func (s *Server) HandleResponseHeaders(ctx context.Context, reqCtx *RequestConte
 
 	if !headers.GetEndOfStream() {
 		log.FromContext(ctx).V(logutil.VERBOSE).Info("captured response headers, deferring response until body arrives...")
-		return nil
 	}
-	// EndOfStream means no body is expected, return HeadersResponse immediately
+	// Always respond to response headers so Envoy proceeds with body chunks.
+	// In STREAMED/FULL_DUPLEX_STREAMED mode, Envoy blocks until we respond.
 	return []*eppb.ProcessingResponse{
 		{
 			Response: &eppb.ProcessingResponse_ResponseHeaders{
@@ -58,14 +61,34 @@ func (s *Server) HandleResponseHeaders(ctx context.Context, reqCtx *RequestConte
 
 // HandleResponseBody handles response bodies by executing response plugins in order.
 func (s *Server) HandleResponseBody(ctx context.Context, reqCtx *RequestContext, responseBodyBytes []byte) ([]*eppb.ProcessingResponse, error) {
+	// Notify the data layer of the completed response.
+	if s.eventNotifier != nil {
+		s.eventNotifier.Notify(datasource.Event{
+			Type: datasource.ResponseEventType,
+			Payload: datasource.ResponsePayload{
+				Request:  reqCtx.Request,
+				Response: reqCtx.Response,
+				Duration: reqCtx.ResponseCompleteTimestamp.Sub(reqCtx.RequestReceivedTimestamp),
+				TTFT:     reqCtx.ResponseFirstChunkTimestamp.Sub(reqCtx.RequestSentTimestamp),
+			},
+		})
+	}
+
 	logger := log.FromContext(ctx)
 	if len(reqCtx.Profile.ResponsePlugins) == 0 {
 		return s.generateEmptyResponseBodyResponse(responseBodyBytes), nil
 	}
 
 	if err := json.Unmarshal(responseBodyBytes, &reqCtx.Response.Body); err != nil {
-		logger.Error(err, "Failed to parse response body as JSON, skipping response plugins")
-		return s.generateEmptyResponseBodyResponse(responseBodyBytes), nil
+		// Try parsing as SSE (Server-Sent Events) — streaming responses from providers
+		// like Anthropic use SSE format which isn't valid JSON.
+		if sseBody, sseErr := parseSSEResponseBody(responseBodyBytes); sseErr == nil && sseBody != nil {
+			reqCtx.Response.Body = sseBody
+			logger.V(logutil.VERBOSE).Info("parsed SSE response body for response plugins")
+		} else {
+			logger.Error(err, "Failed to parse response body as JSON or SSE, skipping response plugins")
+			return s.generateEmptyResponseBodyResponse(responseBodyBytes), nil
+		}
 	}
 
 	if err := s.runResponsePlugins(ctx, reqCtx.CycleState, reqCtx.Response, reqCtx.Profile.ResponsePlugins); err != nil {
@@ -105,18 +128,18 @@ func (s *Server) HandleResponseBody(ctx context.Context, reqCtx *RequestContext,
 	return ret, nil
 }
 
-// generateEmptyResponseBodyResponse builds a streaming response with an empty
-// ResponseHeaders followed by chunked body responses via AddStreamedResponseBody.
-func (s *Server) generateEmptyResponseBodyResponse(responseBodyBytes []byte) []*eppb.ProcessingResponse {
-	responses := []*eppb.ProcessingResponse{
+// generateEmptyResponseBodyResponse returns an empty BodyResponse ack for the
+// final (EndOfStream) response body chunk. In STREAMED mode, Envoy has already
+// forwarded all chunks downstream via per-chunk acks, so re-emitting the body
+// would cause a content-length / transfer-encoding mismatch on the client.
+func (s *Server) generateEmptyResponseBodyResponse(_ []byte) []*eppb.ProcessingResponse {
+	return []*eppb.ProcessingResponse{
 		{
-			Response: &eppb.ProcessingResponse_ResponseHeaders{
-				ResponseHeaders: &eppb.HeadersResponse{},
+			Response: &eppb.ProcessingResponse_ResponseBody{
+				ResponseBody: &eppb.BodyResponse{},
 			},
 		},
 	}
-	responses = envoy.AddStreamedResponseBody(responses, responseBodyBytes)
-	return responses
 }
 
 // HandleResponseTrailers handles response trailers.
@@ -128,6 +151,76 @@ func (s *Server) HandleResponseTrailers(trailers *eppb.HttpTrailers) ([]*eppb.Pr
 			},
 		},
 	}, nil
+}
+
+// parseSSEResponseBody extracts a composite response body from an SSE (Server-Sent Events)
+// stream. It parses by SSE event boundaries instead of individual lines because one logical
+// event may legally contain multiple consecutive `data:` lines that must be joined before JSON decoding.
+func parseSSEResponseBody(body []byte) (map[string]any, error) {
+	result := map[string]any{}
+	lines := bytes.Split(body, []byte("\n"))
+	eventDataLines := make([][]byte, 0)
+
+	flushEvent := func() {
+		if len(eventDataLines) == 0 {
+			return
+		}
+
+		data := bytes.Join(eventDataLines, []byte("\n"))
+		eventDataLines = eventDataLines[:0]
+
+		data = bytes.TrimSpace(data)
+		if len(data) == 0 || bytes.Equal(data, []byte("[DONE]")) {
+			return
+		}
+
+		var event map[string]any
+		if err := json.Unmarshal(data, &event); err != nil {
+			return
+		}
+
+		if model, ok := event["model"].(string); ok && model != "" {
+			result["model"] = model
+		}
+
+		usage, _ := event["usage"].(map[string]any)
+		if usage == nil {
+			if resp, ok := event["response"].(map[string]any); ok {
+				usage, _ = resp["usage"].(map[string]any)
+				if m, ok := resp["model"].(string); ok && m != "" {
+					result["model"] = m
+				}
+			}
+		}
+		if usage != nil {
+			existing, _ := result["usage"].(map[string]any)
+			if existing == nil {
+				existing = map[string]any{}
+			}
+			for k, v := range usage {
+				existing[k] = v
+			}
+			result["usage"] = existing
+		}
+	}
+
+	for _, line := range lines {
+		trimmed := bytes.TrimRight(line, "\r")
+		if len(trimmed) == 0 {
+			flushEvent()
+			continue
+		}
+		if bytes.HasPrefix(trimmed, []byte("data:")) {
+			eventDataLines = append(eventDataLines, bytes.TrimSpace(trimmed[5:]))
+		}
+	}
+	flushEvent()
+
+	if len(result) == 0 {
+		return nil, errors.New("no parseable SSE data events found")
+	}
+
+	return result, nil
 }
 
 // runResponsePlugins executes response plugins in the order they were registered.
