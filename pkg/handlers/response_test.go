@@ -72,26 +72,13 @@ func TestHandleResponseBody_NoPlugins(t *testing.T) {
 		t.Fatalf("HandleResponseBody returned unexpected error: %v", err)
 	}
 
+	// With STREAMED response_body_mode, the body has already been forwarded
+	// downstream via the per-chunk acks issued in Process. The EoS reply is
+	// just an empty BodyResponse ack.
 	want := []*extProcPb.ProcessingResponse{
 		{
-			Response: &extProcPb.ProcessingResponse_ResponseHeaders{
-				ResponseHeaders: &extProcPb.HeadersResponse{},
-			},
-		},
-		{
 			Response: &extProcPb.ProcessingResponse_ResponseBody{
-				ResponseBody: &extProcPb.BodyResponse{
-					Response: &extProcPb.CommonResponse{
-						BodyMutation: &extProcPb.BodyMutation{
-							Mutation: &extProcPb.BodyMutation_StreamedResponse{
-								StreamedResponse: &extProcPb.StreamedBodyResponse{
-									Body:        responseBody,
-									EndOfStream: true,
-								},
-							},
-						},
-					},
-				},
+				ResponseBody: &extProcPb.BodyResponse{},
 			},
 		},
 	}
