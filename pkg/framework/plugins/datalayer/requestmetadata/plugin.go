@@ -22,6 +22,9 @@ import (
 	"fmt"
 	"time"
 
+	"sigs.k8s.io/controller-runtime/pkg/log"
+
+	logutil "github.com/llm-d/llm-d-inference-payload-processor/pkg/common/observability/logging"
 	"github.com/llm-d/llm-d-inference-payload-processor/pkg/framework/interface/datalayer"
 	dlsrc "github.com/llm-d/llm-d-inference-payload-processor/pkg/framework/interface/datalayer/datasource"
 	"github.com/llm-d/llm-d-inference-payload-processor/pkg/framework/interface/plugin"
@@ -171,7 +174,9 @@ func (e *RequestMetadataExtractor) WithEmaAlpha(alpha float64) *RequestMetadataE
 	return e
 }
 
-func (e *RequestMetadataExtractor) Extract(_ context.Context, events []dlsrc.Event) error {
+func (e *RequestMetadataExtractor) Extract(ctx context.Context, events []dlsrc.Event) error {
+	debugLogger := log.FromContext(ctx).V(logutil.DEBUG)
+	debugLogger.Info("request-metadata extractor invoked", "num_events", len(events))
 	now := time.Now()
 	updated := map[string]bool{}
 
@@ -227,7 +232,15 @@ func (e *RequestMetadataExtractor) Extract(_ context.Context, events []dlsrc.Eve
 	}
 
 	for model := range updated {
-		e.ds.GetOrCreateModel(model).GetAttributes().Put(RequestMetadataAttributeKey, e.state[model].ModelMetrics)
+		m := e.state[model].ModelMetrics
+		e.ds.GetOrCreateModel(model).GetAttributes().Put(RequestMetadataAttributeKey, m)
+		debugLogger.Info("request-metadata wrote attribute",
+			"model", model,
+			"Requests", m.Requests,
+			"AvgTTFT_s", m.AvgTTFT,
+			"AvgTPOT_s", m.AvgTPOT,
+			"LastObservedAt", m.LastObservedAt,
+		)
 	}
 	return nil
 }
