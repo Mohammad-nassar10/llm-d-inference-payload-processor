@@ -349,6 +349,8 @@ func TestExtractorFactoryWiresDatastore(t *testing.T) {
 	}
 }
 
+// TestExtractorFactoryAppliesConfig verifies that JSON parameters override the
+// default emaAlpha and intervalDuration on the constructed extractor.
 func TestExtractorFactoryAppliesConfig(t *testing.T) {
 	ds := datastore.NewFakeDataStore()
 	h := &fakeHandle{ds: ds}
@@ -370,6 +372,8 @@ func TestExtractorFactoryAppliesConfig(t *testing.T) {
 	}
 }
 
+// TestExtractorFactoryDefaultsApplied verifies that an empty parameters object
+// leaves the extractor with defaultEmaAlpha and defaultIntervalDuration.
 func TestExtractorFactoryDefaultsApplied(t *testing.T) {
 	ds := datastore.NewFakeDataStore()
 	h := &fakeHandle{ds: ds}
@@ -388,6 +392,8 @@ func TestExtractorFactoryDefaultsApplied(t *testing.T) {
 	}
 }
 
+// TestExtractorFactoryInvalidIntervalDuration verifies that the factory returns
+// an error when intervalDuration cannot be parsed as a time.Duration.
 func TestExtractorFactoryInvalidIntervalDuration(t *testing.T) {
 	ds := datastore.NewFakeDataStore()
 	h := &fakeHandle{ds: ds}
