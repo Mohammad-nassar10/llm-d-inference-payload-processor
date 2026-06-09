@@ -69,6 +69,7 @@ func (s *InflightRequestsScorer) WithName(name string) *InflightRequestsScorer {
 // Formula: score = (max - count) / (max - min)
 func (s *InflightRequestsScorer) Score(ctx context.Context, _ *plugin.CycleState, _ *requesthandling.InferenceRequest, models []datalayer.Model) map[datalayer.Model]float64 {
 	debugLogger := log.FromContext(ctx).V(logutil.DEBUG)
+	debugEnabled := debugLogger.Enabled()
 	var minCount int64 = math.MaxInt64
 	var maxCount int64 = math.MinInt64
 
@@ -76,7 +77,9 @@ func (s *InflightRequestsScorer) Score(ctx context.Context, _ *plugin.CycleState
 	for _, model := range models {
 		count := inflightRequestCount(model)
 		requestCounts[model] = count
-		debugLogger.Info("inflight-scorer count", "model", model.GetName(), "count", count)
+		if debugEnabled {
+			debugLogger.Info("inflight-scorer count", "model", model.GetName(), "count", count)
+		}
 		if count < minCount {
 			minCount = count
 		}
@@ -93,7 +96,9 @@ func (s *InflightRequestsScorer) Score(ctx context.Context, _ *plugin.CycleState
 			scores[model] = float64(maxCount-requestCounts[model]) / float64(maxCount-minCount)
 		}
 	}
-	debugLogger.Info("inflight-scorer result", "minCount", minCount, "maxCount", maxCount, "scores", scoresByName(scores))
+	if debugEnabled {
+		debugLogger.Info("inflight-scorer result", "minCount", minCount, "maxCount", maxCount, "scores", scoresByName(scores))
+	}
 	return scores
 }
 
