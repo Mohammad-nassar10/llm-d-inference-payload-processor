@@ -140,7 +140,7 @@ func (p *ExplorationMaxScorePicker) Pick(ctx context.Context, _ *plugin.CycleSta
 	var stale []*modelselector.ScoredModel
 	p.mu.Lock()
 	for _, sm := range scoredModels {
-		name := sm.Model.GetName()
+		name := sm.GetName()
 		prev, seen := p.lastScore[name]
 		if !seen || prev != sm.Score {
 			p.lastScore[name] = sm.Score
