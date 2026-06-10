@@ -140,6 +140,14 @@ func (s *Server) generateEmptyResponseBodyResponse(_ []byte) []*eppb.ProcessingR
 	}
 }
 
+const (
+	sseDataPrefix     = "data:"
+	sseDoneMarker     = "[DONE]"
+	bodyFieldModel    = "model"
+	bodyFieldUsage    = "usage"
+	bodyFieldResponse = "response"
+)
+
 // parseSSEResponseBody extracts a composite response body from an SSE (Server-Sent Events)
 // stream. It parses by SSE event boundaries instead of individual lines because one logical
 // event may legally contain multiple consecutive `data:` lines that must be joined before JSON decoding.
@@ -157,7 +165,7 @@ func parseSSEResponseBody(body []byte) (map[string]any, error) {
 		eventDataLines = eventDataLines[:0]
 
 		data = bytes.TrimSpace(data)
-		if len(data) == 0 || bytes.Equal(data, []byte("[DONE]")) {
+		if len(data) == 0 || bytes.Equal(data, []byte(sseDoneMarker)) {
 			return
 		}
 
@@ -166,28 +174,28 @@ func parseSSEResponseBody(body []byte) (map[string]any, error) {
 			return
 		}
 
-		if model, ok := event["model"].(string); ok && model != "" {
-			result["model"] = model
+		if model, ok := event[bodyFieldModel].(string); ok && model != "" {
+			result[bodyFieldModel] = model
 		}
 
-		usage, _ := event["usage"].(map[string]any)
+		usage, _ := event[bodyFieldUsage].(map[string]any)
 		if usage == nil {
-			if resp, ok := event["response"].(map[string]any); ok {
-				usage, _ = resp["usage"].(map[string]any)
-				if m, ok := resp["model"].(string); ok && m != "" {
-					result["model"] = m
+			if resp, ok := event[bodyFieldResponse].(map[string]any); ok {
+				usage, _ = resp[bodyFieldUsage].(map[string]any)
+				if m, ok := resp[bodyFieldModel].(string); ok && m != "" {
+					result[bodyFieldModel] = m
 				}
 			}
 		}
 		if usage != nil {
-			existing, _ := result["usage"].(map[string]any)
+			existing, _ := result[bodyFieldUsage].(map[string]any)
 			if existing == nil {
 				existing = map[string]any{}
 			}
 			for k, v := range usage {
 				existing[k] = v
 			}
-			result["usage"] = existing
+			result[bodyFieldUsage] = existing
 		}
 	}
 
@@ -197,8 +205,8 @@ func parseSSEResponseBody(body []byte) (map[string]any, error) {
 			flushEvent()
 			continue
 		}
-		if bytes.HasPrefix(trimmed, []byte("data:")) {
-			eventDataLines = append(eventDataLines, bytes.TrimSpace(trimmed[5:]))
+		if bytes.HasPrefix(trimmed, []byte(sseDataPrefix)) {
+			eventDataLines = append(eventDataLines, bytes.TrimSpace(trimmed[len(sseDataPrefix):]))
 		}
 	}
 	flushEvent()
