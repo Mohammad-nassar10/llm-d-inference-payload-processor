@@ -46,6 +46,7 @@ import (
 	"github.com/llm-d/llm-d-inference-payload-processor/pkg/framework/interface/plugin"
 	"github.com/llm-d/llm-d-inference-payload-processor/pkg/framework/interface/requesthandling"
 	requestmetadata "github.com/llm-d/llm-d-inference-payload-processor/pkg/framework/plugins/datalayer/requestmetadata"
+	"github.com/llm-d/llm-d-inference-payload-processor/pkg/framework/plugins/modelselector/picker/explorationmaxscore"
 	"github.com/llm-d/llm-d-inference-payload-processor/pkg/framework/plugins/modelselector/picker/maxscore"
 	"github.com/llm-d/llm-d-inference-payload-processor/pkg/framework/plugins/modelselector/picker/random"
 	"github.com/llm-d/llm-d-inference-payload-processor/pkg/framework/plugins/modelselector/picker/weightedrandom"
@@ -261,6 +262,7 @@ func (r *Runner) registerInTreePlugins() {
 	plugin.Register(random.RandomPickerType, random.RandomPickerFactory)
 	plugin.Register(maxscore.MaxScorePickerType, maxscore.MaxScorePickerFactory)
 	plugin.Register(weightedrandom.WeightedRandomPickerType, weightedrandom.WeightedRandomPickerFactory)
+	plugin.Register(explorationmaxscore.PickerType, explorationmaxscore.PickerFactory)
 	plugin.Register(modelselectorplugin.ModelSelectorPluginType, modelselectorplugin.ModelSelectorPluginFactory)
 	plugin.Register(inflightrequestsscorer.PluginType, inflightrequestsscorer.ScorerFactory)
 	plugin.Register(avgttftscorer.PluginType, avgttftscorer.ScorerFactory)
