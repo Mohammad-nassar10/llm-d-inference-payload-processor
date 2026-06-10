@@ -33,6 +33,8 @@ type Handle interface {
 	Client() client.Client
 	ReconcilerBuilder() *ctrlbuilder.Builder
 	Datastore() datalayer.Datastore
+	// EventNotifier returns the datalayer event notifier plugins can use to fire events.
+	EventNotifier() datalayer.EventNotifier
 	HandlePlugins
 }
 
@@ -53,9 +55,10 @@ type HandlePlugins interface {
 
 // payloadProcessorHandle is an implementation of the Handle interface.
 type payloadProcessorHandle struct {
-	ctx context.Context
-	mgr ctrl.Manager
-	ds  datalayer.Datastore
+	ctx      context.Context
+	mgr      ctrl.Manager
+	ds       datalayer.Datastore
+	notifier datalayer.EventNotifier
 	HandlePlugins
 }
 
@@ -74,6 +77,10 @@ func (h *payloadProcessorHandle) ReconcilerBuilder() *ctrlbuilder.Builder {
 
 func (h *payloadProcessorHandle) Datastore() datalayer.Datastore {
 	return h.ds
+}
+
+func (h *payloadProcessorHandle) EventNotifier() datalayer.EventNotifier {
+	return h.notifier
 }
 
 // ippHandlePlugins implements the set of APIs to work with instantiated plugins
@@ -105,11 +112,12 @@ func (h *ippHandlePlugins) GetAllPluginsWithNames() map[string]Plugin {
 	return h.plugins
 }
 
-func NewHandle(ctx context.Context, mgr ctrl.Manager, ds datalayer.Datastore) Handle {
+func NewHandle(ctx context.Context, mgr ctrl.Manager, ds datalayer.Datastore, notifier datalayer.EventNotifier) Handle {
 	return &payloadProcessorHandle{
-		ctx: ctx,
-		mgr: mgr,
-		ds:  ds,
+		ctx:      ctx,
+		mgr:      mgr,
+		ds:       ds,
+		notifier: notifier,
 		HandlePlugins: &ippHandlePlugins{
 			plugins: map[string]Plugin{},
 		},

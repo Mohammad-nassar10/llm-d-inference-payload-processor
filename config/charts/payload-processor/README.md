@@ -19,7 +19,7 @@ the deployment and service are deployed.
 To install via the latest published chart in staging  (--version v0 indicates latest dev version), you can run the following command:
 
 ```txt
-$ helm install payload-processor oci://ghcr.io/llm-d/charts/payload-processor \ 
+$ helm install payload-processor oci://ghcr.io/ms-llmd/charts/payload-processor \
     --version v0
     --set provider.name=[gke|istio]
 ```
@@ -109,7 +109,7 @@ The following table list the configurable parameters of the chart.
 | `payloadProcessor.image.registry`         | Registry URL where the image is hosted.                                                                                                                                                                                                                                                          |
 | `payloadProcessor.image.tag`              | Image tag.                                                                                                                                                                                                                                                                                       |
 | `payloadProcessor.image.pullPolicy`       | Image pull policy for the container. Possible values: `Always`, `IfNotPresent`, or `Never`. Defaults to `Always`.                                                                                                                                                                                |
-| `payloadProcessor.flags`                  | map of flags which are passed through to the payload processor. Refer to [runner.go](https://github.com/llm-d/llm-d-inference-payload-processor/blob/main/cmd/payload-processor/runner/runner.go) for complete list.                                                                                                     |
+| `payloadProcessor.flags`                  | map of flags which are passed through to the payload processor. Refer to [runner.go](https://github.com/ms-llmd/llm-d-inference-payload-processor/blob/main/cmd/payload-processor/runner/runner.go) for complete list.                                                                                                     |
 | `payloadProcessor.plugins`   | Custom ordered plugins array to set for the payload processor. Each plugin has fields: type, name and optionally json (which represents parameters of the plugin). If not specified, the payload processor will use by default the `body-field-to-header` to extract the `model` field, and `base-model-to-header` (in that order). |
 | `provider.name`              | Name of the Inference Gateway implementation being used. Possible values: `istio`, `gke`. Defaults to `none`.                                                                                                                                                                                    |
 | `provider.supportedEvents.requestHeaders` | Enable Request Headers event. Defaults to `true`. |

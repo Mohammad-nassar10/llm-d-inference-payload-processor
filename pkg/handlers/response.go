@@ -28,6 +28,7 @@ import (
 
 	envoy "github.com/llm-d/llm-d-inference-payload-processor/pkg/common/envoy"
 	logutil "github.com/llm-d/llm-d-inference-payload-processor/pkg/common/observability/logging"
+	datasource "github.com/llm-d/llm-d-inference-payload-processor/pkg/framework/interface/datalayer/datasource"
 	"github.com/llm-d/llm-d-inference-payload-processor/pkg/framework/interface/plugin"
 	"github.com/llm-d/llm-d-inference-payload-processor/pkg/framework/interface/requesthandling"
 	"github.com/llm-d/llm-d-inference-payload-processor/pkg/metrics"
@@ -58,6 +59,17 @@ func (s *Server) HandleResponseHeaders(ctx context.Context, reqCtx *RequestConte
 
 // HandleResponseBody handles response bodies by executing response plugins in order.
 func (s *Server) HandleResponseBody(ctx context.Context, reqCtx *RequestContext, responseBodyBytes []byte) ([]*eppb.ProcessingResponse, error) {
+	// Notify the data layer of the completed response.
+	s.eventNotifier.Notify(datasource.Event{
+		Type: datasource.ResponseEventType,
+		Payload: datasource.ResponsePayload{
+			Request:  reqCtx.Request,
+			Response: reqCtx.Response,
+			Duration: reqCtx.ResponseCompleteTimestamp.Sub(reqCtx.RequestReceivedTimestamp),
+			TTFT:     reqCtx.ResponseFirstChunkTimestamp.Sub(reqCtx.RequestSentTimestamp),
+		},
+	})
+
 	logger := log.FromContext(ctx)
 	if len(reqCtx.Profile.ResponsePlugins) == 0 {
 		return s.generateEmptyResponseBodyResponse(responseBodyBytes), nil

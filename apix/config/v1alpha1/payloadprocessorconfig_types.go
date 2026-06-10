@@ -64,12 +64,24 @@ type PayloadProcessorConfig struct {
 	PostProcessing *PluginRefList `json:"postProcessing"`
 
 	// +optional
-	// NotificationSources is an optional list of references to notification-source plugins to start.
-	NotificationSources []PluginRef `json:"notificationSources,omitempty"`
+	// Datalayer is an optional configuration for Collector, Extractor, and DataSource plugins
+	// registered with the built-in datalayer Processor.
+	Datalayer *DatalayerConfig `json:"datalayer,omitempty"`
+}
+
+// DatalayerConfig holds the plugin references for the three datalayer plugin categories.
+type DatalayerConfig struct {
+	// +optional
+	// Collectors is an optional list of references to Collector plugins.
+	Collectors []PluginRef `json:"collectors,omitempty"`
 
 	// +optional
-	// PollingSources is an optional list of references to polling-source plugins to start.
-	PollingSources []PluginRef `json:"pollingSources,omitempty"`
+	// Extractors is an optional list of references to Extractor plugins.
+	Extractors []PluginRef `json:"extractors,omitempty"`
+
+	// +optional
+	// Datasources is an optional list of references to DataSource plugins.
+	Datasources []PluginRef `json:"datasources,omitempty"`
 }
 
 func (cfg PayloadProcessorConfig) String() string {
@@ -87,11 +99,8 @@ func (cfg PayloadProcessorConfig) String() string {
 	if cfg.PostProcessing != nil {
 		fmt.Fprintf(contents, ", PostProcessing: %v", cfg.PostProcessing)
 	}
-	if len(cfg.NotificationSources) > 0 {
-		fmt.Fprintf(contents, ", NotificationSources: %v", cfg.NotificationSources)
-	}
-	if len(cfg.PollingSources) > 0 {
-		fmt.Fprintf(contents, ", PollingSources: %v", cfg.PollingSources)
+	if cfg.Datalayer != nil {
+		fmt.Fprintf(contents, ", Datalayer: %v", cfg.Datalayer)
 	}
 
 	return "{" + contents.String() + "}"

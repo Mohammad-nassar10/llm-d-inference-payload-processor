@@ -16,6 +16,26 @@ limitations under the License.
 
 package datalayer
 
+// EventType identifies the kind of runtime event.
+type EventType string
+
+const (
+	RequestEventType  EventType = "request"
+	ResponseEventType EventType = "response"
+)
+
+// Event is the carrier for all data layer events.
+type Event struct {
+	Type    EventType
+	Payload any
+}
+
+// EventNotifier is the narrow interface plugins use to fire datalayer events.
+// Defined here (not in datasource) to avoid import cycles with the plugin package.
+type EventNotifier interface {
+	Notify(e Event)
+}
+
 // Datastore is the interface for reading and updating the model store.
 type Datastore interface {
 	GetOrCreateModel(name string) Model

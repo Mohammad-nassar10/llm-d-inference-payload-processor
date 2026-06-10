@@ -20,6 +20,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/llm-d/llm-d-inference-payload-processor/pkg/framework/interface/datalayer"
 	"github.com/llm-d/llm-d-inference-payload-processor/pkg/framework/interface/plugin"
 	"github.com/llm-d/llm-d-inference-payload-processor/pkg/framework/interface/requesthandling"
 )
@@ -32,19 +33,16 @@ type DataSource interface {
 	Stop()
 }
 
-// EventType identifies the kind of runtime event.
-type EventType string
+// EventType, Event, and EventNotifier are defined in the parent datalayer package
+// to avoid import cycles. Alias them here for convenience.
+type EventType = datalayer.EventType
+type Event = datalayer.Event
+type EventNotifier = datalayer.EventNotifier
 
 const (
-	RequestEventType  EventType = "request"
-	ResponseEventType EventType = "response"
+	RequestEventType  = datalayer.RequestEventType
+	ResponseEventType = datalayer.ResponseEventType
 )
-
-// Event is the carrier for all data layer events.
-type Event struct {
-	Type    EventType
-	Payload any
-}
 
 // RequestPayload is the Payload for RequestEventType.
 type RequestPayload struct {
@@ -59,19 +57,13 @@ type ResponsePayload struct {
 	TTFT     time.Duration
 }
 
-// EventNotifier is the narrow interface the producer uses to fire events.
-// Keeping it separate lets the server depend only on Notify, not on lifecycle
-// or extractor registration.
-type EventNotifier interface {
-	Notify(e Event)
-}
-
-// NotificationSource manages the background pipeline.
-// It implements EventNotifier and can be passed to the producer as one.
-type NotificationSource interface {
-	DataSource
+type DatalayerProcessor interface {
 	EventNotifier
 	RegisterExtractor(e Extractor)
+	RegisterCollector(c Collector, frequency time.Duration)
+	RegisterDatasource(d DataSource)
+	Start(ctx context.Context) error
+	Stop()
 }
 
 // Extractor processes a batch of Events. It does not manage its own goroutines.
@@ -80,14 +72,9 @@ type Extractor interface {
 	Extract(ctx context.Context, events []Event) error
 }
 
-// PollingSource is a poll-based Datasource that fetches data from various sources at regular intervals.
-type PollingSource interface {
-	DataSource
-	RegisterCollector(c Collector, frequency time.Duration)
-}
-
 // A Collector is a poll mechanism to fetch data from a configured data source.
 type Collector interface {
 	plugin.Plugin
 	Poll(ctx context.Context) (any, error)
+	CollectorFrequency() time.Duration
 }

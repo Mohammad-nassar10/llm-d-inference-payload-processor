@@ -21,6 +21,9 @@ import (
 	"encoding/json"
 	"math"
 
+	"sigs.k8s.io/controller-runtime/pkg/log"
+
+	logutil "github.com/llm-d/llm-d-inference-payload-processor/pkg/common/observability/logging"
 	"github.com/llm-d/llm-d-inference-payload-processor/pkg/framework/interface/datalayer"
 	"github.com/llm-d/llm-d-inference-payload-processor/pkg/framework/interface/modelselector"
 	"github.com/llm-d/llm-d-inference-payload-processor/pkg/framework/interface/plugin"
@@ -64,7 +67,9 @@ func (s *InflightRequestsScorer) WithName(name string) *InflightRequestsScorer {
 
 // Score returns a score in [0,1] for each model based on its in-flight request count.
 // Formula: score = (max - count) / (max - min)
-func (s *InflightRequestsScorer) Score(_ context.Context, _ *plugin.CycleState, _ *requesthandling.InferenceRequest, models []datalayer.Model) map[datalayer.Model]float64 {
+func (s *InflightRequestsScorer) Score(ctx context.Context, _ *plugin.CycleState, _ *requesthandling.InferenceRequest, models []datalayer.Model) map[datalayer.Model]float64 {
+	debugLogger := log.FromContext(ctx).V(logutil.DEBUG)
+	debugEnabled := debugLogger.Enabled()
 	var minCount int64 = math.MaxInt64
 	var maxCount int64 = math.MinInt64
 
@@ -72,6 +77,9 @@ func (s *InflightRequestsScorer) Score(_ context.Context, _ *plugin.CycleState, 
 	for _, model := range models {
 		count := inflightRequestCount(model)
 		requestCounts[model] = count
+		if debugEnabled {
+			debugLogger.Info("inflight-scorer count", "model", model.GetName(), "count", count)
+		}
 		if count < minCount {
 			minCount = count
 		}
@@ -88,7 +96,19 @@ func (s *InflightRequestsScorer) Score(_ context.Context, _ *plugin.CycleState, 
 			scores[model] = float64(maxCount-requestCounts[model]) / float64(maxCount-minCount)
 		}
 	}
+	if debugEnabled {
+		debugLogger.Info("inflight-scorer result", "minCount", minCount, "maxCount", maxCount, "scores", scoresByName(scores))
+	}
 	return scores
+}
+
+// scoresByName converts the score map (keyed by datalayer.Model) into a name->score map for logging.
+func scoresByName(scores map[datalayer.Model]float64) map[string]float64 {
+	out := make(map[string]float64, len(scores))
+	for m, s := range scores {
+		out[m.GetName()] = s
+	}
+	return out
 }
 
 // inflightRequestCount returns the in-flight request count for a model.

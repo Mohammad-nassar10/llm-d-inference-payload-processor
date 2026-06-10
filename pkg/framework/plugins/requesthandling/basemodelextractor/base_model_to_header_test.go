@@ -121,7 +121,7 @@ func TestBaseModelToHeaderPluginFactory(t *testing.T) {
 			fakeDS := datastore.NewFakeDataStore()
 
 			// Create a handle using the test manager and fake datastore
-			handle := plugin.NewHandle(context.Background(), mgr, fakeDS)
+			handle := plugin.NewHandle(context.Background(), mgr, fakeDS, nil)
 
 			p, err := BaseModelToHeaderPluginFactory(tt.pluginName, tt.rawParams, handle)
 			if err != nil {

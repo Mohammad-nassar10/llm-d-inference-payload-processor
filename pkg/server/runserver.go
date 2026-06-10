@@ -29,6 +29,7 @@ import (
 
 	"github.com/llm-d/llm-d-inference-payload-processor/internal/runnable"
 	tlsutil "github.com/llm-d/llm-d-inference-payload-processor/internal/tls"
+	datasource "github.com/llm-d/llm-d-inference-payload-processor/pkg/framework/interface/datalayer/datasource"
 	"github.com/llm-d/llm-d-inference-payload-processor/pkg/framework/interface/requesthandling"
 	"github.com/llm-d/llm-d-inference-payload-processor/pkg/handlers"
 )
@@ -39,6 +40,7 @@ type ExtProcServerRunner struct {
 	SecureServing bool
 	ProfilePicker requesthandling.ProfilePicker
 	Profiles      map[string]*requesthandling.Profile
+	EventNotifier datasource.EventNotifier
 }
 
 func NewDefaultExtProcServerRunner(port int) *ExtProcServerRunner {
@@ -67,7 +69,8 @@ func (r *ExtProcServerRunner) AsRunnable(logger logr.Logger) manager.Runnable {
 			srv = grpc.NewServer()
 		}
 
-		extProcPb.RegisterExternalProcessorServer(srv, handlers.NewServer(r.ProfilePicker, r.Profiles))
+		server := handlers.NewServer(r.ProfilePicker, r.Profiles).WithEventNotifier(r.EventNotifier)
+		extProcPb.RegisterExternalProcessorServer(srv, server)
 
 		// Forward to the gRPC runnable.
 		return runnable.GRPCServer("ext-proc", srv, r.GrpcPort).Start(ctx)
