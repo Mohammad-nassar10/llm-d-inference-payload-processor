@@ -19,7 +19,9 @@ package avgtpot
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"math"
+	"time"
 
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
@@ -29,28 +31,67 @@ import (
 	"github.com/llm-d/llm-d-inference-payload-processor/pkg/framework/interface/plugin"
 	"github.com/llm-d/llm-d-inference-payload-processor/pkg/framework/interface/requesthandling"
 	requestmetadata "github.com/llm-d/llm-d-inference-payload-processor/pkg/framework/plugins/datalayer/requestmetadata"
+	"github.com/llm-d/llm-d-inference-payload-processor/pkg/framework/plugins/modelselector/scorer/internal/decay"
 )
 
-const PluginType = "avg-tpot-scorer"
+const (
+	PluginType = "avg-tpot-scorer"
+
+	// defaultDecayWeight = 0 keeps the scorer's behavior at raw AvgTPOT (no decay).
+	defaultDecayWeight        = 0.0
+	defaultStalenessThreshold = 30 * time.Second
+)
 
 // compile-time interface assertion
 var _ modelselector.Scorer = &AvgTPOTScorer{}
+
+// AvgTPOTScorerConfig holds the scorer's JSON parameters.
+type AvgTPOTScorerConfig struct {
+	// DecayWeight scales the staleness decay in [0,1]; default 0 (disabled).
+	DecayWeight *float64 `json:"decayWeight,omitempty"`
+	// StalenessThreshold is the elapsed time for full staleness (e.g. "30s"). Default "30s".
+	StalenessThreshold string `json:"stalenessThreshold,omitempty"`
+}
 
 // AvgTPOTScorer scores models based on their exponential moving average TPOT.
 // The model with the lowest AvgTPOT scores 1.0; the highest scores 0.0.
 // Models with no observed TPOT yet (AvgTPOT == 0) are treated as idle and score 1.0.
 // If all models have the same AvgTPOT, all score 1.0.
+// Stale EMAs can be decayed toward zero (see the decay package); off by default — set DecayWeight > 0 to enable.
 type AvgTPOTScorer struct {
 	typedName plugin.TypedName
+	decayCfg  decay.Config
 }
 
-func ScorerFactory(name string, _ json.RawMessage, _ plugin.Handle) (plugin.Plugin, error) {
-	return NewAvgTPOTScorer().WithName(name), nil
+func ScorerFactory(name string, parameters json.RawMessage, _ plugin.Handle) (plugin.Plugin, error) {
+	config := AvgTPOTScorerConfig{
+		StalenessThreshold: defaultStalenessThreshold.String(),
+	}
+	if len(parameters) > 0 {
+		if err := json.Unmarshal(parameters, &config); err != nil {
+			return nil, fmt.Errorf("failed to parse parameters for plugin %q: %w", name, err)
+		}
+	}
+	weight := defaultDecayWeight
+	if config.DecayWeight != nil {
+		weight = *config.DecayWeight
+	}
+	if weight < 0 || weight > 1 {
+		return nil, fmt.Errorf("invalid decayWeight %v for plugin %q: must be in [0, 1]", weight, name)
+	}
+	threshold, err := time.ParseDuration(config.StalenessThreshold)
+	if err != nil {
+		return nil, fmt.Errorf("invalid stalenessThreshold %q for plugin %q: %w", config.StalenessThreshold, name, err)
+	}
+	return NewAvgTPOTScorer().
+		WithName(name).
+		WithDecay(decay.Config{Weight: weight, Threshold: threshold}), nil
 }
 
 func NewAvgTPOTScorer() *AvgTPOTScorer {
 	return &AvgTPOTScorer{
 		typedName: plugin.TypedName{Type: PluginType, Name: PluginType},
+		decayCfg:  decay.Config{Weight: defaultDecayWeight, Threshold: defaultStalenessThreshold},
 	}
 }
 
@@ -61,15 +102,21 @@ func (s *AvgTPOTScorer) WithName(name string) *AvgTPOTScorer {
 	return s
 }
 
-// Score returns a score in [0,1] for each model.
-// Formula: score = (max - avgTPOT) / (max - min)
+// WithDecay overrides the decay configuration.
+func (s *AvgTPOTScorer) WithDecay(cfg decay.Config) *AvgTPOTScorer {
+	s.decayCfg = cfg
+	return s
+}
+
+// Score returns score = (max - avgTPOT)/(max - min) per model, with optional staleness decay.
 func (s *AvgTPOTScorer) Score(ctx context.Context, _ *plugin.CycleState, _ *requesthandling.InferenceRequest, models []datalayer.Model) map[datalayer.Model]float64 {
+	now := time.Now()
 	tpots := make(map[datalayer.Model]float64, len(models))
 	minTPOT := math.MaxFloat64
 	maxTPOT := 0.0
 
 	for _, model := range models {
-		v := avgTPOT(model)
+		v := s.avgTPOT(model, now)
 		tpots[model] = v
 		if v > maxTPOT {
 			maxTPOT = v
@@ -97,8 +144,8 @@ func (s *AvgTPOTScorer) Score(ctx context.Context, _ *plugin.CycleState, _ *requ
 	return scores
 }
 
-// avgTPOT returns the AvgTPOT for a model, or 0 if not yet observed.
-func avgTPOT(model datalayer.Model) float64 {
+// avgTPOT returns the decay-adjusted AvgTPOT, or 0 if unobserved.
+func (s *AvgTPOTScorer) avgTPOT(model datalayer.Model, now time.Time) float64 {
 	val, ok := model.GetAttributes().Get(requestmetadata.RequestMetadataAttributeKey)
 	if !ok {
 		return 0
@@ -107,5 +154,12 @@ func avgTPOT(model datalayer.Model) float64 {
 	if !ok {
 		return 0
 	}
-	return rc.AvgTPOT
+	if rc.AvgTPOT == 0 {
+		return 0
+	}
+	var lastObservedAt time.Time
+	if rc.LastObservedAt > 0 {
+		lastObservedAt = time.Unix(0, rc.LastObservedAt)
+	}
+	return decay.Apply(rc.AvgTPOT, lastObservedAt, rc.Requests, now, s.decayCfg)
 }

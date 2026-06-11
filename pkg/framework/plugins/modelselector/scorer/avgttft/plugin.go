@@ -19,6 +19,7 @@ package avgttft
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"math"
 	"time"
 
@@ -30,33 +31,66 @@ import (
 	"github.com/llm-d/llm-d-inference-payload-processor/pkg/framework/interface/plugin"
 	"github.com/llm-d/llm-d-inference-payload-processor/pkg/framework/interface/requesthandling"
 	requestmetadata "github.com/llm-d/llm-d-inference-payload-processor/pkg/framework/plugins/datalayer/requestmetadata"
+	"github.com/llm-d/llm-d-inference-payload-processor/pkg/framework/plugins/modelselector/scorer/internal/decay"
 )
 
 const (
 	PluginType = "avg-ttft-scorer"
 
-	// stalenessThreshold is the duration after which an unupdated AvgTTFT EMA is considered stale.
-	stalenessThreshold = 30 * time.Second
+	defaultDecayWeight        = 1.0
+	defaultStalenessThreshold = 30 * time.Second
 )
 
 // compile-time interface assertion
 var _ modelselector.Scorer = &AvgTTFTScorer{}
 
+// AvgTTFTScorerConfig holds the scorer's JSON parameters.
+type AvgTTFTScorerConfig struct {
+	// DecayWeight scales the staleness decay in [0,1]; 0 disables. Default 1.0.
+	DecayWeight *float64 `json:"decayWeight,omitempty"`
+	// StalenessThreshold is the elapsed time for full staleness (e.g. "30s"). Default "30s".
+	StalenessThreshold string `json:"stalenessThreshold,omitempty"`
+}
+
 // AvgTTFTScorer scores models based on their exponential moving average TTFT.
 // The model with the lowest AvgTTFT scores 1.0; the highest scores 0.0.
 // Models with no observed TTFT yet (AvgTTFT == 0) are treated as idle and score 1.0.
 // If all models have the same AvgTTFT, all score 1.0.
+// Stale EMAs are decayed toward zero (see the decay package); set DecayWeight=0 to disable.
 type AvgTTFTScorer struct {
 	typedName plugin.TypedName
+	decayCfg  decay.Config
 }
 
-func ScorerFactory(name string, _ json.RawMessage, _ plugin.Handle) (plugin.Plugin, error) {
-	return NewAvgTTFTScorer().WithName(name), nil
+func ScorerFactory(name string, parameters json.RawMessage, _ plugin.Handle) (plugin.Plugin, error) {
+	config := AvgTTFTScorerConfig{
+		StalenessThreshold: defaultStalenessThreshold.String(),
+	}
+	if len(parameters) > 0 {
+		if err := json.Unmarshal(parameters, &config); err != nil {
+			return nil, fmt.Errorf("failed to parse parameters for plugin %q: %w", name, err)
+		}
+	}
+	weight := defaultDecayWeight
+	if config.DecayWeight != nil {
+		weight = *config.DecayWeight
+	}
+	if weight < 0 || weight > 1 {
+		return nil, fmt.Errorf("invalid decayWeight %v for plugin %q: must be in [0, 1]", weight, name)
+	}
+	threshold, err := time.ParseDuration(config.StalenessThreshold)
+	if err != nil {
+		return nil, fmt.Errorf("invalid stalenessThreshold %q for plugin %q: %w", config.StalenessThreshold, name, err)
+	}
+	return NewAvgTTFTScorer().
+		WithName(name).
+		WithDecay(decay.Config{Weight: weight, Threshold: threshold}), nil
 }
 
 func NewAvgTTFTScorer() *AvgTTFTScorer {
 	return &AvgTTFTScorer{
 		typedName: plugin.TypedName{Type: PluginType, Name: PluginType},
+		decayCfg:  decay.Config{Weight: defaultDecayWeight, Threshold: defaultStalenessThreshold},
 	}
 }
 
@@ -67,11 +101,13 @@ func (s *AvgTTFTScorer) WithName(name string) *AvgTTFTScorer {
 	return s
 }
 
-// Score returns a score in [0,1] for each model.
-// Formula: score = (max - avgTTFT) / (max - min)
-// avgTTFT applies a staleness decay to AvgTTFT when the EMA has not been
-// updated recently and the model has few in-flight requests, allowing models
-// that have recovered from saturation to regain a competitive score.
+// WithDecay overrides the decay configuration.
+func (s *AvgTTFTScorer) WithDecay(cfg decay.Config) *AvgTTFTScorer {
+	s.decayCfg = cfg
+	return s
+}
+
+// Score returns score = (max - avgTTFT)/(max - min) per model, with optional staleness decay.
 func (s *AvgTTFTScorer) Score(ctx context.Context, _ *plugin.CycleState, _ *requesthandling.InferenceRequest, models []datalayer.Model) map[datalayer.Model]float64 {
 	now := time.Now()
 	ttfts := make(map[datalayer.Model]float64, len(models))
@@ -79,7 +115,7 @@ func (s *AvgTTFTScorer) Score(ctx context.Context, _ *plugin.CycleState, _ *requ
 	maxTTFT := 0.0
 
 	for _, model := range models {
-		v := avgTTFT(model, now)
+		v := s.avgTTFT(model, now)
 		ttfts[model] = v
 		if v > maxTTFT {
 			maxTTFT = v
@@ -107,16 +143,8 @@ func (s *AvgTTFTScorer) Score(ctx context.Context, _ *plugin.CycleState, _ *requ
 	return scores
 }
 
-// avgTTFT returns a decay-adjusted AvgTTFT for scoring.
-// When the EMA is stale and the model has few in-flight requests, the returned
-// value is smoothly reduced toward 0 so the model regains a competitive score.
-//
-// decay  = staleness × idleness
-// result = AvgTTFT × (1 - decay)
-//
-// staleness = min(elapsed / stalenessThreshold, 1.0), grows to 1 over threshold
-// idleness  = 1 / (1 + Requests), 1.0 when idle, drops under load
-func avgTTFT(model datalayer.Model, now time.Time) float64 {
+// avgTTFT returns the decay-adjusted AvgTTFT, or 0 if unobserved.
+func (s *AvgTTFTScorer) avgTTFT(model datalayer.Model, now time.Time) float64 {
 	val, ok := model.GetAttributes().Get(requestmetadata.RequestMetadataAttributeKey)
 	if !ok {
 		return 0
@@ -128,13 +156,9 @@ func avgTTFT(model datalayer.Model, now time.Time) float64 {
 	if rc.AvgTTFT == 0 {
 		return 0
 	}
-
-	staleness := 0.0
+	var lastObservedAt time.Time
 	if rc.LastObservedAt > 0 {
-		elapsed := now.Sub(time.Unix(0, rc.LastObservedAt))
-		staleness = math.Min(float64(elapsed)/float64(stalenessThreshold), 1.0)
+		lastObservedAt = time.Unix(0, rc.LastObservedAt)
 	}
-	idleness := 1.0 / (1.0 + float64(rc.Requests))
-	decay := staleness * idleness
-	return rc.AvgTTFT * (1 - decay)
+	return decay.Apply(rc.AvgTTFT, lastObservedAt, rc.Requests, now, s.decayCfg)
 }

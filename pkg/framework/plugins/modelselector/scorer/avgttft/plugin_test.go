@@ -23,6 +23,7 @@ import (
 
 	fwdatalayer "github.com/llm-d/llm-d-inference-payload-processor/pkg/framework/interface/datalayer"
 	requestmetadata "github.com/llm-d/llm-d-inference-payload-processor/pkg/framework/plugins/datalayer/requestmetadata"
+	"github.com/llm-d/llm-d-inference-payload-processor/pkg/framework/plugins/modelselector/scorer/internal/decay"
 )
 
 func modelWithAvgTTFT(name string, avgTTFT float64) fwdatalayer.Model {
@@ -141,4 +142,21 @@ func TestStalenessDecay(t *testing.T) {
 				scores[staleBusy], scores[fresh])
 		}
 	})
+}
+
+// TestDecayDisabled verifies DecayWeight=0 ignores staleness entirely.
+func TestDecayDisabled(t *testing.T) {
+	scorer := NewAvgTTFTScorer().WithDecay(decay.Config{Weight: 0, Threshold: 30 * time.Second})
+	now := time.Now()
+
+	// With decay off, the stale model keeps its raw TTFT and scores 0.0 (not 1.0).
+	stale := modelWithMetrics("stale", 1.0, 0, now.Add(-60*time.Second))
+	other := modelWithAvgTTFT("other", 0.5)
+	scores := scorer.Score(context.Background(), nil, nil, []fwdatalayer.Model{stale, other})
+	if scores[stale] != 0.0 {
+		t.Errorf("decay-disabled stale model: expected score 0.0 (raw EMA), got %f", scores[stale])
+	}
+	if scores[other] != 1.0 {
+		t.Errorf("decay-disabled other model: expected score 1.0, got %f", scores[other])
+	}
 }

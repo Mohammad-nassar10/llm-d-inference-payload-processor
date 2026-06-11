@@ -93,7 +93,7 @@ type ModelMetrics struct {
 	Requests       int64
 	AvgTTFT        float64
 	AvgTPOT        float64
-	LastObservedAt int64 // Unix nanoseconds of the last TTFT EMA update; 0 if never observed.
+	LastObservedAt int64
 }
 
 func (r ModelMetrics) Clone() datalayer.Cloneable { return r }
@@ -119,6 +119,7 @@ func (s *modelIntervalAccumulator) flush(now time.Time, model string, alpha floa
 	}
 	if s.tpotN > 0 {
 		s.AvgTPOT = ema(s.AvgTPOT, s.tpotSum/float64(s.tpotN), alpha)
+		s.LastObservedAt = now.UnixNano()
 		metrics.RecordModelAvgTPOT(model, s.AvgTPOT)
 	}
 	s.intervalStart = now
