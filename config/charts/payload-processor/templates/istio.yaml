@@ -34,7 +34,7 @@ spec:
             request_header_mode: {{ if .Values.provider.supportedEvents.requestHeaders }}"SEND"{{ else }}"SKIP"{{ end }}
             response_header_mode: {{ if .Values.provider.supportedEvents.responseHeaders }}"SEND"{{ else }}"SKIP"{{ end }}
             request_body_mode: {{ if .Values.provider.supportedEvents.requestBody }}"FULL_DUPLEX_STREAMED"{{ else }}"NONE"{{ end }}
-            response_body_mode: {{ if .Values.provider.supportedEvents.responseBody }}"FULL_DUPLEX_STREAMED"{{ else }}"NONE"{{ end }}
+            response_body_mode: {{ if .Values.provider.supportedEvents.responseBody }}"STREAMED"{{ else }}"NONE"{{ end }}
             request_trailer_mode: {{ if .Values.provider.supportedEvents.requestTrailers }}"SEND"{{ else }}"SKIP"{{ end }}
             response_trailer_mode: {{ if .Values.provider.supportedEvents.responseTrailers }}"SEND"{{ else }}"SKIP"{{ end }}
           grpc_service:

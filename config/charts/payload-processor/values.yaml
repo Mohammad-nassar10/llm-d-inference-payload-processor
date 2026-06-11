@@ -2,7 +2,7 @@ payloadProcessor:
   name: payload-processor
   replicas: 1
   image:
-    registry: ghcr.io/llm-d
+    registry: ghcr.io/ms-llmd
     repository: llm-d-inference-payload-processor
     tag: main
     pullPolicy: IfNotPresent

@@ -29,6 +29,7 @@ import (
 	envoy "github.com/llm-d/llm-d-inference-payload-processor/pkg/common/envoy"
 	errcommon "github.com/llm-d/llm-d-inference-payload-processor/pkg/common/error"
 	logutil "github.com/llm-d/llm-d-inference-payload-processor/pkg/common/observability/logging"
+	datasource "github.com/llm-d/llm-d-inference-payload-processor/pkg/framework/interface/datalayer/datasource"
 	"github.com/llm-d/llm-d-inference-payload-processor/pkg/framework/interface/plugin"
 	"github.com/llm-d/llm-d-inference-payload-processor/pkg/framework/interface/requesthandling"
 	"github.com/llm-d/llm-d-inference-payload-processor/pkg/metrics"
@@ -90,7 +91,14 @@ func (s *Server) HandleRequestBody(ctx context.Context, reqCtx *RequestContext, 
 		reqCtx.Request.SetHeader(contentLengthHeader, strconv.Itoa(len(requestBodyBytes)))
 	}
 
+	// Notify the data layer of the incoming request after headers are fully formed.
+	s.eventNotifier.Notify(datasource.Event{
+		Type:    datasource.RequestEventType,
+		Payload: datasource.RequestPayload{Request: reqCtx.Request},
+	})
+
 	metrics.RecordSuccessCounter()
+	reqCtx.RequestSentTimestamp = time.Now()
 
 	ret = append(ret, &eppb.ProcessingResponse{
 		Response: &eppb.ProcessingResponse_RequestHeaders{

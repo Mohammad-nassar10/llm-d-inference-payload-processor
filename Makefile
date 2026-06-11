@@ -5,7 +5,7 @@ include Makefile.gen.mk
 
 # Project configuration
 PROJECT_NAME ?= llm-d-inference-payload-processor
-REGISTRY ?= ghcr.io/llm-d
+REGISTRY ?= ghcr.io/ms-llmd
 IMAGE ?= $(REGISTRY)/$(PROJECT_NAME)
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
 PLATFORMS ?= linux/amd64,linux/arm64
@@ -82,7 +82,7 @@ image-push: ## Build and push multi-arch container image
 	docker buildx build \
 		--platform $(PLATFORMS) \
 		--push \
-		--annotation "index:org.opencontainers.image.source=https://github.com/llm-d/$(PROJECT_NAME)" \
+		--annotation "index:org.opencontainers.image.source=https://github.com/ms-llmd/$(PROJECT_NAME)" \
 		--annotation "index:org.opencontainers.image.licenses=Apache-2.0" \
 		--tag $(IMAGE):$(VERSION) \
 		--tag $(IMAGE):latest \
