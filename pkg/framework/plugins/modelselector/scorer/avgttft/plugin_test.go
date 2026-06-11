@@ -38,10 +38,10 @@ func modelWithNoAttribute(name string) fwdatalayer.Model {
 	return fwdatalayer.NewModel(name)
 }
 
-func modelWithMetrics(name string, avgTTFT float64, requests int64, lastObservedAt time.Time) fwdatalayer.Model {
+func modelWithMetrics(name string, requests int64, lastObservedAt time.Time) fwdatalayer.Model {
 	model := fwdatalayer.NewModel(name)
 	model.GetAttributes().Put(requestmetadata.RequestMetadataAttributeKey, requestmetadata.ModelMetrics{
-		AvgTTFT:        avgTTFT,
+		AvgTTFT:        1.0,
 		Requests:       requests,
 		LastObservedAt: lastObservedAt.UnixNano(),
 	})
@@ -113,7 +113,7 @@ func TestStalenessDecay(t *testing.T) {
 
 	t.Run("fresh model — no decay applied", func(t *testing.T) {
 		// LastObservedAt = now → staleness = 0 → effective TTFT = raw AvgTTFT
-		fresh := modelWithMetrics("fresh", 1.0, 0, now)
+		fresh := modelWithMetrics("fresh", 0, now)
 		other := modelWithNoAttribute("other") // AvgTTFT=0, scores 1.0
 		scores := scorer.Score(context.Background(), nil, nil, []fwdatalayer.Model{fresh, other})
 		if scores[fresh] != 0.0 {
@@ -123,7 +123,7 @@ func TestStalenessDecay(t *testing.T) {
 
 	t.Run("fully stale idle model — full decay, scores 1.0", func(t *testing.T) {
 		// LastObservedAt = 60s ago (2× threshold), Requests=0 → decay=1.0 → effective TTFT=0
-		stale := modelWithMetrics("stale", 1.0, 0, now.Add(-60*time.Second))
+		stale := modelWithMetrics("stale", 0, now.Add(-60*time.Second))
 		other := modelWithAvgTTFT("other", 0.5)
 		scores := scorer.Score(context.Background(), nil, nil, []fwdatalayer.Model{stale, other})
 		if scores[stale] != 1.0 {
@@ -134,7 +134,7 @@ func TestStalenessDecay(t *testing.T) {
 	t.Run("stale but still busy — decay suppressed by load", func(t *testing.T) {
 		// staleness=1.0, Requests=9 → idleness=0.1 → decay=0.1 → effective TTFT = 0.9 × raw
 		// The stale-busy model should still score lower than a fresh idle model.
-		staleBusy := modelWithMetrics("stale-busy", 1.0, 9, now.Add(-60*time.Second))
+		staleBusy := modelWithMetrics("stale-busy", 9, now.Add(-60*time.Second))
 		fresh := modelWithAvgTTFT("fresh", 0.1)
 		scores := scorer.Score(context.Background(), nil, nil, []fwdatalayer.Model{staleBusy, fresh})
 		if scores[staleBusy] >= scores[fresh] {
@@ -150,7 +150,7 @@ func TestDecayDisabled(t *testing.T) {
 	now := time.Now()
 
 	// With decay off, the stale model keeps its raw TTFT and scores 0.0 (not 1.0).
-	stale := modelWithMetrics("stale", 1.0, 0, now.Add(-60*time.Second))
+	stale := modelWithMetrics("stale", 0, now.Add(-60*time.Second))
 	other := modelWithAvgTTFT("other", 0.5)
 	scores := scorer.Score(context.Background(), nil, nil, []fwdatalayer.Model{stale, other})
 	if scores[stale] != 0.0 {

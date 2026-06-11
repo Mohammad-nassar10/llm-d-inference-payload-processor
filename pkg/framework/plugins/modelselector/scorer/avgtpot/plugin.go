@@ -37,8 +37,7 @@ import (
 const (
 	PluginType = "avg-tpot-scorer"
 
-	// defaultDecayWeight = 0 keeps the scorer's behavior at raw AvgTPOT (no decay).
-	defaultDecayWeight        = 0.0
+	defaultDecayWeight        = 1.0
 	defaultStalenessThreshold = 30 * time.Second
 )
 
@@ -47,7 +46,7 @@ var _ modelselector.Scorer = &AvgTPOTScorer{}
 
 // AvgTPOTScorerConfig holds the scorer's JSON parameters.
 type AvgTPOTScorerConfig struct {
-	// DecayWeight scales the staleness decay in [0,1]; default 0 (disabled).
+	// DecayWeight scales the staleness decay in [0,1]; 0 disables. Default 1.0.
 	DecayWeight *float64 `json:"decayWeight,omitempty"`
 	// StalenessThreshold is the elapsed time for full staleness (e.g. "30s"). Default "30s".
 	StalenessThreshold string `json:"stalenessThreshold,omitempty"`
@@ -57,7 +56,7 @@ type AvgTPOTScorerConfig struct {
 // The model with the lowest AvgTPOT scores 1.0; the highest scores 0.0.
 // Models with no observed TPOT yet (AvgTPOT == 0) are treated as idle and score 1.0.
 // If all models have the same AvgTPOT, all score 1.0.
-// Stale EMAs can be decayed toward zero (see the decay package); off by default — set DecayWeight > 0 to enable.
+// Stale EMAs are decayed toward zero (see the decay package); set DecayWeight=0 to disable.
 type AvgTPOTScorer struct {
 	typedName plugin.TypedName
 	decayCfg  decay.Config
