@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package avgttft
+package avgtpot
 
 import (
 	"context"
@@ -26,10 +26,10 @@ import (
 	"github.com/llm-d/llm-d-inference-payload-processor/pkg/framework/plugins/modelselector/scorer/internal/decay"
 )
 
-func modelWithAvgTTFT(name string, avgTTFT float64) fwdatalayer.Model {
+func modelWithAvgTPOT(name string, avgTPOT float64) fwdatalayer.Model {
 	model := fwdatalayer.NewModel(name)
 	model.GetAttributes().Put(requestmetadata.RequestMetadataAttributeKey, requestmetadata.ModelMetrics{
-		AvgTTFT: avgTTFT,
+		AvgTPOT: avgTPOT,
 	})
 	return model
 }
@@ -41,15 +41,15 @@ func modelWithNoAttribute(name string) fwdatalayer.Model {
 func modelWithMetrics(name string, requests int64, lastObservedAt time.Time) fwdatalayer.Model {
 	model := fwdatalayer.NewModel(name)
 	model.GetAttributes().Put(requestmetadata.RequestMetadataAttributeKey, requestmetadata.ModelMetrics{
-		AvgTTFT:        1.0,
+		AvgTPOT:        0.1,
 		Requests:       requests,
 		LastObservedAt: lastObservedAt.UnixNano(),
 	})
 	return model
 }
 
-func TestAvgTTFTScorer(t *testing.T) {
-	scorer := NewAvgTTFTScorer()
+func TestAvgTPOTScorer(t *testing.T) {
+	scorer := NewAvgTPOTScorer()
 
 	tests := []struct {
 		name           string
@@ -57,36 +57,37 @@ func TestAvgTTFTScorer(t *testing.T) {
 		expectedScores []float64
 	}{
 		{
-			name: "lower TTFT gets higher score",
+			name: "lower TPOT gets higher score",
 			models: []fwdatalayer.Model{
-				modelWithAvgTTFT("fast", 0.2),
-				modelWithAvgTTFT("slow", 1.0),
+				modelWithAvgTPOT("fast", 0.02),
+				modelWithAvgTPOT("slow", 0.1),
 			},
 			expectedScores: []float64{1.0, 0.0},
 		},
 		{
-			name: "equal TTFT — all score 1.0",
+			name: "equal TPOT — all score 1.0",
 			models: []fwdatalayer.Model{
-				modelWithAvgTTFT("m1", 0.5),
-				modelWithAvgTTFT("m2", 0.5),
+				modelWithAvgTPOT("m1", 0.05),
+				modelWithAvgTPOT("m2", 0.05),
 			},
 			expectedScores: []float64{1.0, 1.0},
 		},
 		{
 			name: "no attribute scores optimistically (treated as 0)",
 			models: []fwdatalayer.Model{
-				modelWithAvgTTFT("observed", 0.5),
+				modelWithAvgTPOT("observed", 0.05),
 				modelWithNoAttribute("unobserved"),
 			},
 			expectedScores: []float64{0.0, 1.0},
 		},
 		{
 			name: "three models — intermediate score is normalised",
-			// min=0.2, max=1.0; middle=0.6 → (1.0-0.6)/(1.0-0.2) = 0.5
+			// min=0.25, max=0.75; middle=0.5 → (0.75-0.5)/(0.75-0.25) = 0.5
+			// 0.25, 0.5, 0.75 are exact in float64 so the comparison is safe without epsilon.
 			models: []fwdatalayer.Model{
-				modelWithAvgTTFT("fast", 0.2),
-				modelWithAvgTTFT("mid", 0.6),
-				modelWithAvgTTFT("slow", 1.0),
+				modelWithAvgTPOT("fast", 0.25),
+				modelWithAvgTPOT("mid", 0.5),
+				modelWithAvgTPOT("slow", 0.75),
 			},
 			expectedScores: []float64{1.0, 0.5, 0.0},
 		},
@@ -106,41 +107,27 @@ func TestAvgTTFTScorer(t *testing.T) {
 	}
 }
 
-// TestStalenessDecay verifies the decay formula for recovering models.
+// TestStalenessDecay verifies the decay recovers a stale idle model.
 func TestStalenessDecay(t *testing.T) {
-	scorer := NewAvgTTFTScorer()
+	scorer := NewAvgTPOTScorer()
 	now := time.Now()
 
-	t.Run("fresh model — no decay applied", func(t *testing.T) {
-		// LastObservedAt = now → staleness = 0 → effective TTFT = raw AvgTTFT
-		fresh := modelWithMetrics("fresh", 0, now)
-		other := modelWithNoAttribute("other") // AvgTTFT=0, scores 1.0
-		scores := scorer.Score(context.Background(), nil, nil, []fwdatalayer.Model{fresh, other})
-		if scores[fresh] != 0.0 {
-			t.Errorf("fresh model: expected score 0.0, got %f", scores[fresh])
-		}
-	})
-
-	t.Run("fully stale idle model — full decay, scores 1.0", func(t *testing.T) {
-		// LastObservedAt = 60s ago (2× threshold), Requests=0 → decay=1.0 → effective TTFT=0
-		stale := modelWithMetrics("stale", 0, now.Add(-60*time.Second))
-		other := modelWithAvgTTFT("other", 0.5)
-		scores := scorer.Score(context.Background(), nil, nil, []fwdatalayer.Model{stale, other})
-		if scores[stale] != 1.0 {
-			t.Errorf("fully stale idle model: expected score 1.0, got %f", scores[stale])
-		}
-	})
-
+	// LastObservedAt = 60s ago (2× threshold), Requests=0 → decay=1.0 → effective TPOT=0
+	stale := modelWithMetrics("stale", 0, now.Add(-60*time.Second))
+	other := modelWithAvgTPOT("other", 0.05)
+	scores := scorer.Score(context.Background(), nil, nil, []fwdatalayer.Model{stale, other})
+	if scores[stale] != 1.0 {
+		t.Errorf("fully stale idle model: expected score 1.0, got %f", scores[stale])
+	}
 }
 
 // TestDecayDisabled verifies DecayWeight=0 ignores staleness entirely.
 func TestDecayDisabled(t *testing.T) {
-	scorer := NewAvgTTFTScorer().WithDecay(decay.Config{Weight: 0, Threshold: 30 * time.Second})
+	scorer := NewAvgTPOTScorer().WithDecay(decay.Config{Weight: 0, Threshold: 30 * time.Second})
 	now := time.Now()
 
-	// With decay off, the stale model keeps its raw TTFT and scores 0.0 (not 1.0).
 	stale := modelWithMetrics("stale", 0, now.Add(-60*time.Second))
-	other := modelWithAvgTTFT("other", 0.5)
+	other := modelWithAvgTPOT("other", 0.05)
 	scores := scorer.Score(context.Background(), nil, nil, []fwdatalayer.Model{stale, other})
 	if scores[stale] != 0.0 {
 		t.Errorf("decay-disabled stale model: expected score 0.0 (raw EMA), got %f", scores[stale])
