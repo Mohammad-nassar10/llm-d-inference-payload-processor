@@ -1,0 +1,36 @@
+payloadProcessor:
+  # Models to seed into the datastore at startup. The chart renders these into
+  # a models.json file inside the configmap, which the model-config-datasource
+  # plugin (configured below) reads from /config/models.json.
+  listModels:
+    - your-model-A
+    - your-model-B
+  customConfig:
+    plugins:
+    - type: body-field-to-header
+      parameters:
+        fieldName: model
+        headerName: X-Gateway-Model-Name
+    - type: base-model-to-header
+    - type: model-selector
+    - type: avg-ttft-scorer
+    - type: max-score-picker
+    - type: request-metadata-extractor
+    - type: model-config-datasource
+      parameters:
+        modelsPath: /config/models.json
+    profiles:
+    - name: default
+      plugins:
+        request:
+        - pluginRef: model-selector
+        - pluginRef: avg-ttft-scorer
+          weight: 1.0
+        - pluginRef: max-score-picker
+        - pluginRef: body-field-to-header
+        - pluginRef: base-model-to-header
+    datalayer:
+      extractors:
+      - pluginRef: request-metadata-extractor
+      datasources:
+      - pluginRef: model-config-datasource

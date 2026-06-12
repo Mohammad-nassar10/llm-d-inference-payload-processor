@@ -18,6 +18,7 @@ package error
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -171,6 +172,14 @@ func TestCanonicalCode(t *testing.T) {
 			name: "Non-Error type",
 			err:  errors.New("standard go error"),
 			want: Unknown,
+		},
+		{
+			name: "Wrapped Error keeps its code",
+			err: fmt.Errorf("model selection failed: %w", Error{
+				Code: BadRequest,
+				Msg:  "no models available after filtering",
+			}),
+			want: BadRequest,
 		},
 		{
 			name: "Nil error",

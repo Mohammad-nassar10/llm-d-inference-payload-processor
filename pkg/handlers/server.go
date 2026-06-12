@@ -156,6 +156,16 @@ func (s *Server) Process(srv extProcPb.ExternalProcessor_ProcessServer) error {
 			}
 			responseBody = append(responseBody, v.ResponseBody.Body...)
 			if !v.ResponseBody.EndOfStream {
+				// Send an immediate response for this chunk so Envoy continues
+				// streaming. Without this, Envoy blocks waiting for our response
+				// and stops forwarding subsequent chunks.
+				if sendErr := srv.Send(&extProcPb.ProcessingResponse{
+					Response: &extProcPb.ProcessingResponse_ResponseBody{
+						ResponseBody: &extProcPb.BodyResponse{},
+					},
+				}); sendErr != nil {
+					return status.Errorf(codes.Unknown, "failed to send streaming response ack: %v", sendErr)
+				}
 				continue
 			}
 			reqCtx.ResponseCompleteTimestamp = time.Now()

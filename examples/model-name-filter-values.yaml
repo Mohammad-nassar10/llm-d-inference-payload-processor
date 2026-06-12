@@ -1,0 +1,43 @@
+payloadProcessor:
+  # Models to seed into the datastore at startup. The chart renders these into
+  # a models.json file inside the configmap, which the model-config-datasource
+  # plugin (configured below) reads from /config/models.json.
+  listModels:
+    - your-model-A
+    - your-model-B
+  customConfig:
+    plugins:
+    - type: body-field-to-header
+      parameters:
+        fieldName: model
+        headerName: X-Gateway-Model-Name
+    - type: base-model-to-header
+    - type: model-selector
+    # Restricts the candidates to the model name(s) in the request body:
+    # a request naming a registered model is routed only to it, an array of
+    # names lets the scorer/picker choose among that subset, and a request
+    # naming no model leaves all candidates available. Unregistered or
+    # malformed model fields are rejected with HTTP 400.
+    - type: model-name-filter
+    - type: inflight-requests-scorer
+    - type: max-score-picker
+    - type: request-metadata-extractor
+    - type: model-config-datasource
+      parameters:
+        modelsPath: /config/models.json
+    profiles:
+    - name: default
+      plugins:
+        request:
+        - pluginRef: model-selector
+        - pluginRef: model-name-filter
+        - pluginRef: inflight-requests-scorer
+          weight: 1.0
+        - pluginRef: max-score-picker
+        - pluginRef: body-field-to-header
+        - pluginRef: base-model-to-header
+    datalayer:
+      extractors:
+      - pluginRef: request-metadata-extractor
+      datasources:
+      - pluginRef: model-config-datasource
