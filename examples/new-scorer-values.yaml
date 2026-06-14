@@ -1,0 +1,41 @@
+payloadProcessor:
+  listModels:
+    - facebook/opt-125m
+    - facebook/opt-350m
+  customConfig:
+    plugins:
+    - type: body-field-to-header
+      parameters:
+        fieldName: model
+        headerName: X-Gateway-Model-Name
+    - type: base-model-to-header
+    - type: model-selector
+    - type: avg-ttft-scorer
+      parameters:
+        decayWeight: 1.0
+        stalenessThreshold: "10s"
+        inflightWeight: 1.0
+        maxIdleProbes: 2
+    - type: max-score-picker
+    - type: request-metadata-extractor
+      parameters:
+        emaAlpha: 0.1
+        intervalDuration: 5s
+    - type: model-config-datasource
+      parameters:
+        modelsPath: /config/models.json
+    profiles:
+    - name: default
+      plugins:
+        request:
+        - pluginRef: model-selector
+        - pluginRef: avg-ttft-scorer
+          weight: 1.0
+        - pluginRef: max-score-picker
+        - pluginRef: body-field-to-header
+        - pluginRef: base-model-to-header
+    datalayer:
+      extractors:
+      - pluginRef: request-metadata-extractor
+      datasources:
+      - pluginRef: model-config-datasource

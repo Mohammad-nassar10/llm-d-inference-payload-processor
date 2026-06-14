@@ -88,9 +88,10 @@ func ExtractorFactory(name string, parameters json.RawMessage, h plugin.Handle) 
 }
 
 // ModelMetrics holds per-model metadata: in-flight request count and
-// EMA estimates for TTFT and TPOT.
+// EMA estimates for TTFT, TPOT, and inflight count.
 type ModelMetrics struct {
 	Requests       int64
+	AvgRequests    float64
 	AvgTTFT        float64
 	AvgTPOT        float64
 	LastObservedAt int64
@@ -112,6 +113,9 @@ type modelIntervalAccumulator struct {
 
 // flush averages the accumulated interval observations into the EMA, emits Prometheus gauges, and resets the interval.
 func (s *modelIntervalAccumulator) flush(now time.Time, model string, alpha float64) {
+	// Always update AvgRequests — it samples the current inflight count each interval
+	// regardless of whether any responses arrived.
+	s.AvgRequests = ema(s.AvgRequests, float64(s.Requests), alpha)
 	if s.ttftN > 0 {
 		s.AvgTTFT = ema(s.AvgTTFT, s.ttftSum/float64(s.ttftN), alpha)
 		s.LastObservedAt = now.UnixNano()

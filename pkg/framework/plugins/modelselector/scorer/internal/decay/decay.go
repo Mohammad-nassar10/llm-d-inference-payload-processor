@@ -24,15 +24,21 @@ import (
 
 // Config controls the decay applied by Apply.
 type Config struct {
-	Weight    float64       // [0,1]; 0 disables decay.
-	Threshold time.Duration // staleness reaches full strength after this elapsed time.
+	Weight        float64       // [0,1]; 0 disables decay.
+	Threshold     time.Duration // staleness reaches full strength after this elapsed time.
+	MaxIdleProbes int64         // decay continues while requests <= MaxIdleProbes (default 0: stop at first inflight).
+	// Raising MaxIdleProbes to 2–3 lets a small burst of parallel probe requests land before
+	// decay is suppressed, giving the EMA enough observations to recover quickly from staleness.
 }
 
-// Apply returns ema * (1 - weight * staleness * idleness), where
-// staleness = min(elapsed/threshold, 1) and idleness = 1/(1+requests).
-// Returns ema unchanged when weight or threshold are non-positive, or lastObservedAt is zero.
+// Apply returns ema * (1 - weight * staleness) while the model has at most MaxIdleProbes
+// in-flight requests, so a recovered but idle (or lightly probed) model can regain a
+// competitive score. Decay stops once requests > MaxIdleProbes, preventing the lock-in
+// where a saturated model is mistakenly made cheaper by having its stale EMA decayed.
+// Returns ema unchanged when weight or threshold are non-positive, lastObservedAt is zero,
+// or requests > MaxIdleProbes.
 func Apply(ema float64, lastObservedAt time.Time, requests int64, now time.Time, cfg Config) float64 {
-	if cfg.Weight <= 0 || cfg.Threshold <= 0 || lastObservedAt.IsZero() {
+	if cfg.Weight <= 0 || cfg.Threshold <= 0 || lastObservedAt.IsZero() || requests > cfg.MaxIdleProbes {
 		return ema
 	}
 	elapsed := now.Sub(lastObservedAt)
@@ -40,7 +46,5 @@ func Apply(ema float64, lastObservedAt time.Time, requests int64, now time.Time,
 		return ema
 	}
 	staleness := math.Min(float64(elapsed)/float64(cfg.Threshold), 1.0)
-	idleness := 1.0 / (1.0 + float64(requests))
-	d := cfg.Weight * staleness * idleness
-	return ema * (1 - d)
+	return ema * (1 - cfg.Weight*staleness)
 }

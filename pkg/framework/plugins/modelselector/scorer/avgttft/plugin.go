@@ -39,6 +39,7 @@ const (
 
 	defaultDecayWeight        = 1.0
 	defaultStalenessThreshold = 30 * time.Second
+	defaultInflightWeight     = 1.0
 )
 
 // compile-time interface assertion
@@ -47,19 +48,32 @@ var _ modelselector.Scorer = &AvgTTFTScorer{}
 // AvgTTFTScorerConfig holds the scorer's JSON parameters.
 type AvgTTFTScorerConfig struct {
 	// DecayWeight scales the staleness decay in [0,1]; 0 disables. Default 1.0.
+	// Decay is only applied when the model has at most MaxIdleProbes in-flight requests,
+	// so it cannot accidentally reward a saturated model.
 	DecayWeight *float64 `json:"decayWeight,omitempty"`
 	// StalenessThreshold is the elapsed time for full staleness (e.g. "30s"). Default "30s".
 	StalenessThreshold string `json:"stalenessThreshold,omitempty"`
+	// InflightWeight scales the queue-depth penalty.
+	// predicted = baseTTFT * (1 + inflightWeight * requests)
+	// This is self-normalizing: a fast model (low AvgTTFT) incurs a small penalty per
+	// inflight request; a slow model incurs a proportionally larger one.
+	// 0 disables the inflight term (pure AvgTTFT behavior). Default 1.0.
+	InflightWeight *float64 `json:"inflightWeight,omitempty"`
+	// MaxIdleProbes is the maximum number of in-flight requests while staleness decay
+	// is still applied. Default 0 (stop decay at the first inflight request).
+	// Raising this to 2–3 lets a small parallel probe burst land before decay is
+	// suppressed, giving the EMA enough signal to recover quickly from staleness.
+	MaxIdleProbes *int64 `json:"maxIdleProbes,omitempty"`
 }
 
-// AvgTTFTScorer scores models based on their exponential moving average TTFT.
-// The model with the lowest AvgTTFT scores 1.0; the highest scores 0.0.
-// Models with no observed TTFT yet (AvgTTFT == 0) are treated as idle and score 1.0.
-// If all models have the same AvgTTFT, all score 1.0.
-// Stale EMAs are decayed toward zero (see the decay package); set DecayWeight=0 to disable.
+// AvgTTFTScorer scores models on predicted TTFT = baseTTFT × (1 + inflightWeight × requests),
+// where baseTTFT is the EMA with optional staleness decay (applied only when the model is idle).
+// The inflight term self-normalizes: a fast model incurs a small queue penalty per request,
+// a slow model a proportionally larger one — no explicit capacity needed.
 type AvgTTFTScorer struct {
-	typedName plugin.TypedName
-	decayCfg  decay.Config
+	typedName      plugin.TypedName
+	decayCfg       decay.Config
+	inflightWeight float64
 }
 
 func ScorerFactory(name string, parameters json.RawMessage, _ plugin.Handle) (plugin.Plugin, error) {
@@ -71,26 +85,36 @@ func ScorerFactory(name string, parameters json.RawMessage, _ plugin.Handle) (pl
 			return nil, fmt.Errorf("failed to parse parameters for plugin %q: %w", name, err)
 		}
 	}
-	weight := defaultDecayWeight
+	decayWeight := defaultDecayWeight
 	if config.DecayWeight != nil {
-		weight = *config.DecayWeight
+		decayWeight = *config.DecayWeight
 	}
-	if weight < 0 || weight > 1 {
-		return nil, fmt.Errorf("invalid decayWeight %v for plugin %q: must be in [0, 1]", weight, name)
+	if decayWeight < 0 || decayWeight > 1 {
+		return nil, fmt.Errorf("invalid decayWeight %v for plugin %q: must be in [0, 1]", decayWeight, name)
 	}
 	threshold, err := time.ParseDuration(config.StalenessThreshold)
 	if err != nil {
 		return nil, fmt.Errorf("invalid stalenessThreshold %q for plugin %q: %w", config.StalenessThreshold, name, err)
 	}
+	inflightWeight := defaultInflightWeight
+	if config.InflightWeight != nil {
+		inflightWeight = *config.InflightWeight
+	}
+	var maxIdleProbes int64
+	if config.MaxIdleProbes != nil {
+		maxIdleProbes = *config.MaxIdleProbes
+	}
 	return NewAvgTTFTScorer().
 		WithName(name).
-		WithDecay(decay.Config{Weight: weight, Threshold: threshold}), nil
+		WithDecay(decay.Config{Weight: decayWeight, Threshold: threshold, MaxIdleProbes: maxIdleProbes}).
+		WithInflight(inflightWeight), nil
 }
 
 func NewAvgTTFTScorer() *AvgTTFTScorer {
 	return &AvgTTFTScorer{
-		typedName: plugin.TypedName{Type: PluginType, Name: PluginType},
-		decayCfg:  decay.Config{Weight: defaultDecayWeight, Threshold: defaultStalenessThreshold},
+		typedName:      plugin.TypedName{Type: PluginType, Name: PluginType},
+		decayCfg:       decay.Config{Weight: defaultDecayWeight, Threshold: defaultStalenessThreshold},
+		inflightWeight: defaultInflightWeight,
 	}
 }
 
@@ -107,6 +131,12 @@ func (s *AvgTTFTScorer) WithDecay(cfg decay.Config) *AvgTTFTScorer {
 	return s
 }
 
+// WithInflight overrides the inflight weight.
+func (s *AvgTTFTScorer) WithInflight(weight float64) *AvgTTFTScorer {
+	s.inflightWeight = weight
+	return s
+}
+
 // Score returns score = (max - avgTTFT)/(max - min) per model, with optional staleness decay.
 func (s *AvgTTFTScorer) Score(ctx context.Context, _ *plugin.CycleState, _ *requesthandling.InferenceRequest, models []datalayer.Model) map[datalayer.Model]float64 {
 	now := time.Now()
@@ -115,7 +145,7 @@ func (s *AvgTTFTScorer) Score(ctx context.Context, _ *plugin.CycleState, _ *requ
 	maxTTFT := 0.0
 
 	for _, model := range models {
-		v := s.avgTTFT(model, now)
+		v := s.predictedTTFT(model, now)
 		ttfts[model] = v
 		if v > maxTTFT {
 			maxTTFT = v
@@ -136,15 +166,23 @@ func (s *AvgTTFTScorer) Score(ctx context.Context, _ *plugin.CycleState, _ *requ
 
 	if debugLogger := log.FromContext(ctx).V(logutil.DEBUG); debugLogger.Enabled() {
 		for _, model := range models {
-			debugLogger.Info("avg-ttft score", "model", model.GetName(), "avgTTFT", ttfts[model], "score", scores[model])
+			debugLogger.Info("avg-ttft score", "model", model.GetName(), "predictedTTFT", ttfts[model], "score", scores[model])
 		}
 	}
 
 	return scores
 }
 
-// avgTTFT returns the decay-adjusted AvgTTFT, or 0 if unobserved.
-func (s *AvgTTFTScorer) avgTTFT(model datalayer.Model, now time.Time) float64 {
+// predictedTTFT returns baseTTFT × (1 + inflightWeight × excess), where:
+//   - baseTTFT is the EMA with decay applied only when the model has at most MaxIdleProbes requests.
+//   - excess = max(requests − AvgRequests, 0): load above the model's normal operating point.
+//
+// The EMA already prices in latency at the typical load (AvgRequests), so penalising only
+// the excess avoids double-counting steady-state concurrency while still reacting immediately
+// to unexpected bursts. At cold start (AvgRequests==0) excess == requests, matching the
+// previous behaviour.
+// Returns 0 if no TTFT has been observed yet (model is treated as idle/new).
+func (s *AvgTTFTScorer) predictedTTFT(model datalayer.Model, now time.Time) float64 {
 	val, ok := model.GetAttributes().Get(requestmetadata.RequestMetadataAttributeKey)
 	if !ok {
 		return 0
@@ -160,5 +198,7 @@ func (s *AvgTTFTScorer) avgTTFT(model datalayer.Model, now time.Time) float64 {
 	if rc.LastObservedAt > 0 {
 		lastObservedAt = time.Unix(0, rc.LastObservedAt)
 	}
-	return decay.Apply(rc.AvgTTFT, lastObservedAt, rc.Requests, now, s.decayCfg)
+	baseTTFT := decay.Apply(rc.AvgTTFT, lastObservedAt, rc.Requests, now, s.decayCfg)
+	excess := math.Max(float64(rc.Requests)-rc.AvgRequests, 0)
+	return baseTTFT * (1 + s.inflightWeight*excess)
 }
