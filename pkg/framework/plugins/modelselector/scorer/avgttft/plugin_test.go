@@ -48,6 +48,12 @@ func modelWithMetrics(name string, requests int64, lastObservedAt time.Time) fwd
 	return model
 }
 
+func modelWithFullMetrics(name string, m requestmetadata.ModelMetrics) fwdatalayer.Model {
+	model := fwdatalayer.NewModel(name)
+	model.GetAttributes().Put(requestmetadata.RequestMetadataAttributeKey, m)
+	return model
+}
+
 func TestAvgTTFTScorer(t *testing.T) {
 	scorer := NewAvgTTFTScorer()
 
@@ -131,6 +137,86 @@ func TestStalenessDecay(t *testing.T) {
 		}
 	})
 
+}
+
+// TestExcessPenaltyFlipsWinner verifies that a burst above AvgRequests raises predictedTTFT
+// enough to flip the winner. fast has lower AvgTTFT but carries excess load; slow is idle.
+//
+//	fast: AvgTTFT=0.2s, Requests=5, AvgRequests=0 → excess=5 → predicted = 0.2×(1+1×5) = 1.2s
+//	slow: AvgTTFT=1.0s, Requests=0, AvgRequests=0 → excess=0 → predicted = 1.0s
+//	1.2 > 1.0 → slow wins despite higher base TTFT.
+func TestExcessPenaltyFlipsWinner(t *testing.T) {
+	scorer := NewAvgTTFTScorer().WithInflight(1.0)
+	fast := modelWithFullMetrics("fast", requestmetadata.ModelMetrics{
+		AvgTTFT: 0.2, Requests: 5, AvgRequests: 0,
+	})
+	slow := modelWithFullMetrics("slow", requestmetadata.ModelMetrics{
+		AvgTTFT: 1.0, Requests: 0, AvgRequests: 0,
+	})
+	scores := scorer.Score(context.Background(), nil, nil, []fwdatalayer.Model{fast, slow})
+	if scores[fast] != 0.0 {
+		t.Errorf("fast (overloaded): expected score 0.0, got %f", scores[fast])
+	}
+	if scores[slow] != 1.0 {
+		t.Errorf("slow (idle): expected score 1.0, got %f", scores[slow])
+	}
+}
+
+// TestSteadyStateNoExcessPenalty verifies that excess=0 when requests==AvgRequests,
+// so the fast model still wins at its normal operating load.
+//
+//	loaded: AvgTTFT=0.2s, Requests=5, AvgRequests=5 → excess=0 → predicted = 0.2s
+//	idle:   AvgTTFT=1.0s, Requests=0, AvgRequests=0 → excess=0 → predicted = 1.0s
+func TestSteadyStateNoExcessPenalty(t *testing.T) {
+	scorer := NewAvgTTFTScorer().WithInflight(1.0)
+	loaded := modelWithFullMetrics("loaded", requestmetadata.ModelMetrics{
+		AvgTTFT: 0.2, Requests: 5, AvgRequests: 5,
+	})
+	idle := modelWithFullMetrics("idle", requestmetadata.ModelMetrics{
+		AvgTTFT: 1.0, Requests: 0, AvgRequests: 0,
+	})
+	scores := scorer.Score(context.Background(), nil, nil, []fwdatalayer.Model{loaded, idle})
+	if scores[loaded] != 1.0 {
+		t.Errorf("loaded (no excess): expected score 1.0, got %f", scores[loaded])
+	}
+	if scores[idle] != 0.0 {
+		t.Errorf("idle: expected score 0.0, got %f", scores[idle])
+	}
+}
+
+// TestMaxIdleProbesAllowsDecay verifies that raising MaxIdleProbes permits staleness
+// decay while the model carries a small probe burst. With MaxIdleProbes=2 and requests=2
+// the decay still applies; with MaxIdleProbes=0 it does not.
+func TestMaxIdleProbesAllowsDecay(t *testing.T) {
+	now := time.Now()
+	staleAt := now.Add(-60 * time.Second) // well beyond any threshold
+
+	// Scorer A: MaxIdleProbes=0 (default) — busy guard stops decay at requests=2.
+	scorerNoProbes := NewAvgTTFTScorer().
+		WithDecay(decay.Config{Weight: 1.0, Threshold: 5 * time.Second, MaxIdleProbes: 0}).
+		WithInflight(0)
+
+	// Scorer B: MaxIdleProbes=2 — decay allowed while requests <= 2.
+	scorerWithProbes := NewAvgTTFTScorer().
+		WithDecay(decay.Config{Weight: 1.0, Threshold: 5 * time.Second, MaxIdleProbes: 2}).
+		WithInflight(0)
+
+	// Model with requests=2 and stale observations.
+	stale := modelWithMetrics("stale", 2, staleAt)
+	other := modelWithAvgTTFT("other", 0.5)
+	models := []fwdatalayer.Model{stale, other}
+
+	// Without MaxIdleProbes: requests=2 > 0 → decay suppressed → stale keeps its TTFT → scores 0.
+	scoresNoProbes := scorerNoProbes.Score(context.Background(), nil, nil, models)
+	if scoresNoProbes[stale] != 0.0 {
+		t.Errorf("MaxIdleProbes=0: stale model expected score 0.0 (decay suppressed), got %f", scoresNoProbes[stale])
+	}
+
+	// With MaxIdleProbes=2: requests=2 <= 2 → decay applies → TTFT decays to 0 → scores 1.0.
+	scoresWithProbes := scorerWithProbes.Score(context.Background(), nil, nil, models)
+	if scoresWithProbes[stale] != 1.0 {
+		t.Errorf("MaxIdleProbes=2: stale model expected score 1.0 (decay applied), got %f", scoresWithProbes[stale])
+	}
 }
 
 // TestDecayDisabled verifies DecayWeight=0 ignores staleness entirely.

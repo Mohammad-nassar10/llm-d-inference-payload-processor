@@ -76,13 +76,28 @@ func TestApply(t *testing.T) {
 			want:           0.0,
 		},
 		{
-			name:           "fully stale busy — decay suppressed by load",
+			name:           "busy model — decay suppressed when requests > MaxIdleProbes",
 			ema:            1.0,
 			lastObservedAt: now.Add(-60 * time.Second),
-			requests:       9,
-			cfg:            Config{Weight: 1, Threshold: threshold},
-			// idleness = 1/10 = 0.1, staleness = 1.0, weight = 1 → decay = 0.1 → result = 0.9
-			want: 0.9,
+			requests:       1,
+			cfg:            Config{Weight: 1, Threshold: threshold, MaxIdleProbes: 0},
+			want:           1.0,
+		},
+		{
+			name:           "MaxIdleProbes — decay applies when requests <= MaxIdleProbes",
+			ema:            1.0,
+			lastObservedAt: now.Add(-60 * time.Second),
+			requests:       2,
+			cfg:            Config{Weight: 1, Threshold: threshold, MaxIdleProbes: 2},
+			want:           0.0, // fully stale, decay = 1.0 → result = 0.0
+		},
+		{
+			name:           "MaxIdleProbes — decay suppressed when requests exceed limit",
+			ema:            1.0,
+			lastObservedAt: now.Add(-60 * time.Second),
+			requests:       3,
+			cfg:            Config{Weight: 1, Threshold: threshold, MaxIdleProbes: 2},
+			want:           1.0, // requests=3 > MaxIdleProbes=2 → no decay
 		},
 		{
 			name:           "half threshold idle — half decay",

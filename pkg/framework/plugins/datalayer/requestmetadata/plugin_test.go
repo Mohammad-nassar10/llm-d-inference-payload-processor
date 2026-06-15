@@ -328,6 +328,89 @@ func TestAvgTPOTZeroCompletionTokensIgnored(t *testing.T) {
 	}
 }
 
+// TestAvgRequestsTracksInflight verifies that AvgRequests is sampled at flush time
+// and blended into an EMA. With intervalDuration=0 every response triggers a flush.
+//
+// Sequence: two requests arrive (Requests=2), one response arrives (Requests=1 after decrement).
+// Flush samples Requests=1 as the first observation → AvgRequests=1.0.
+func TestAvgRequestsTracksInflight(t *testing.T) {
+	ext, ds := newRequestMetadataTest(t)
+
+	if err := ext.Extract(context.Background(), []dlsrc.Event{
+		makeRequestEvent("m1"),
+		makeRequestEvent("m1"),
+		makeResponseEvent(0), // Requests: 2→1 then flush → AvgRequests = 1.0 (first observation)
+	}); err != nil {
+		t.Fatalf("Extract failed: %v", err)
+	}
+
+	rc := getRequestMetadata(t, ds, "m1")
+	if rc.AvgRequests != 1.0 {
+		t.Errorf("expected AvgRequests=1.0 (first observation), got %f", rc.AvgRequests)
+	}
+}
+
+// TestAvgRequestsEMABlend verifies that successive flushes blend AvgRequests with the EMA.
+//
+// Flush 1: Requests=1 → AvgRequests = 1.0 (first observation, no blend)
+// Flush 2: Requests=0 → AvgRequests = 0.1×0 + 0.9×1.0 = 0.9
+func TestAvgRequestsEMABlend(t *testing.T) {
+	ext, ds := newRequestMetadataTest(t)
+
+	// First flush: one request in flight at flush time.
+	if err := ext.Extract(context.Background(), []dlsrc.Event{
+		makeRequestEvent("m1"),
+		makeRequestEvent("m1"),
+		makeResponseEvent(0), // Requests: 2→1 at flush
+	}); err != nil {
+		t.Fatalf("first Extract failed: %v", err)
+	}
+
+	// Second flush: no requests in flight at flush time.
+	if err := ext.Extract(context.Background(), []dlsrc.Event{
+		makeResponseEvent(0), // Requests: 1→0 at flush
+	}); err != nil {
+		t.Fatalf("second Extract failed: %v", err)
+	}
+
+	rc := getRequestMetadata(t, ds, "m1")
+	want := 0.1*0.0 + 0.9*1.0 // 0.9
+	if rc.AvgRequests != want {
+		t.Errorf("expected AvgRequests=%f, got %f", want, rc.AvgRequests)
+	}
+}
+
+// TestAvgRequestsUpdatesWithoutTTFT verifies that AvgRequests is updated on flush
+// even when no TTFT observations arrived in the interval (AvgTTFT stays unchanged).
+func TestAvgRequestsUpdatesWithoutTTFT(t *testing.T) {
+	ext, ds := newRequestMetadataTest(t)
+
+	// Seed a TTFT value.
+	if err := ext.Extract(context.Background(), []dlsrc.Event{
+		makeResponseEventWithTTFT(0, 500*time.Millisecond),
+	}); err != nil {
+		t.Fatalf("seed Extract failed: %v", err)
+	}
+
+	// Two requests arrive; response decrements to 1 so flush sees Requests=1.
+	// No TTFT on this response — AvgTTFT must stay unchanged while AvgRequests updates.
+	if err := ext.Extract(context.Background(), []dlsrc.Event{
+		makeRequestEvent("m1"),
+		makeRequestEvent("m1"),
+		makeResponseEvent(0), // no TTFT field; Requests: 2→1 at flush
+	}); err != nil {
+		t.Fatalf("second Extract failed: %v", err)
+	}
+
+	rc := getRequestMetadata(t, ds, "m1")
+	if rc.AvgTTFT != 0.5 {
+		t.Errorf("expected AvgTTFT=0.5 (unchanged), got %f", rc.AvgTTFT)
+	}
+	if rc.AvgRequests == 0 {
+		t.Errorf("expected AvgRequests to be updated even without TTFT, got 0")
+	}
+}
+
 func TestExtractorFactoryWiresDatastore(t *testing.T) {
 	ds := datastore.NewFakeDataStore()
 	h := &fakeHandle{ds: ds}
