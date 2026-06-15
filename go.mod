@@ -3,6 +3,7 @@ module github.com/llm-d/llm-d-inference-payload-processor
 go 1.25.0
 
 require (
+	github.com/caio/go-tdigest/v5 v5.0.0
 	github.com/envoyproxy/go-control-plane/envoy v1.37.0
 	github.com/fsnotify/fsnotify v1.9.0
 	github.com/go-logr/logr v1.4.3

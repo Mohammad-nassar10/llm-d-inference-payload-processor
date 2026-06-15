@@ -151,7 +151,7 @@ Note: the score assigned by the temperatured sigmoid is not in [0, 1], but in (0
 Implement CostGuard via a series of small PRs
 
  1. Extend `modelconfigcollector` to collect input and output token prices;
- 2. Extend `requestmetadata` to maintain tdigest;
+ 2. Implement a specialized `requestcostmetadata` extractor to maintain tdigest of cost;
  3. Extend `AttributeMap` in the `datastore` to maintain tdigest and warmup counters;
  4. Implement CostGuard;
  5. Wire `CostGuard` with the rest of the system.
