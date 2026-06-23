@@ -21,14 +21,17 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 
 	"github.com/fsnotify/fsnotify"
+	"github.com/go-logr/logr"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	"github.com/llm-d/llm-d-inference-payload-processor/pkg/framework/interface/datalayer"
 	dlsrc "github.com/llm-d/llm-d-inference-payload-processor/pkg/framework/interface/datalayer/datasource"
+	"github.com/llm-d/llm-d-inference-payload-processor/pkg/framework/interface/datalayer/metricsendpoint"
 	"github.com/llm-d/llm-d-inference-payload-processor/pkg/framework/interface/datalayer/pricing"
 	"github.com/llm-d/llm-d-inference-payload-processor/pkg/framework/interface/plugin"
 )
@@ -54,6 +57,12 @@ type PluginConfig struct {
 type ModelConfiguration struct {
 	Name    string                   `json:"name"`
 	Pricing *pricing.ModelPriceShape `json:"pricing,omitempty"`
+	// MetricsURL points at an endpoint that returns Prometheus text-format metrics
+	// already aggregated across the pool's pods (e.g. a Prometheus /federate query
+	// or a thin aggregating service). A raw single-pod /metrics URL is suitable
+	// only for dev/single-replica deployments. When non-empty and well-formed, a
+	// metricsendpoint.MetricsEndpoint attribute is attached to the model.
+	MetricsURL string `json:"metricsURL,omitempty"`
 }
 
 // ModelsConfig is the schema of the JSON config file.
@@ -210,6 +219,8 @@ func (c *ModelConfigDataSource) syncModels(ctx context.Context) error {
 		desired[m.Name] = struct{}{}
 		mdl := c.ds.GetOrCreateModel(m.Name)
 		mdl.GetAttributes().Put(pricing.TokenPricesAttributeKey, pricing.ToTokenPrices(m.Pricing))
+
+		applyMetricsURL(logger, mdl, m.Name, m.MetricsURL)
 	}
 
 	for _, existing := range c.ds.Models() {
@@ -220,4 +231,25 @@ func (c *ModelConfigDataSource) syncModels(ctx context.Context) error {
 	}
 
 	return nil
+}
+
+// applyMetricsURL attaches a metricsendpoint.MetricsEndpoint attribute when raw
+// is a syntactically valid http(s) URL, removes any prior attribute when raw is
+// empty (so file reloads that clear the field work correctly), and treats an
+// invalid URL the same as empty after logging. Validation is intentionally
+// shallow: we only check parseability and scheme so that a typo in the config
+// does not bring a whole sync down.
+func applyMetricsURL(logger logr.Logger, mdl datalayer.Model, modelName, raw string) {
+	if raw == "" {
+		mdl.GetAttributes().Delete(metricsendpoint.AttributeKey)
+		return
+	}
+	parsed, err := url.Parse(raw)
+	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" {
+		logger.Info("ignoring invalid metricsURL; treating as absent",
+			"model", modelName, "metricsURL", raw)
+		mdl.GetAttributes().Delete(metricsendpoint.AttributeKey)
+		return
+	}
+	mdl.GetAttributes().Put(metricsendpoint.AttributeKey, metricsendpoint.MetricsEndpoint{URL: raw})
 }

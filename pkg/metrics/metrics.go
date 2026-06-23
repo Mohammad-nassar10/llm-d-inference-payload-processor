@@ -130,6 +130,40 @@ var (
 		},
 		[]string{"model"},
 	)
+
+	// --- kv-cache-collector observability ---
+	// These three metrics expose the health of the kv-cache-collector plugin:
+	// how long each scrape takes, why scrapes fail, and the most recently
+	// observed utilization. They let operators alert on the collector itself
+	// (stale data, repeated failures) without joining across the IPP's
+	// metrics endpoint and the inference pool's Prometheus.
+	kvCacheScrapeDuration = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Subsystem: component,
+			Name:      "kv_cache_scrape_duration_seconds",
+			Help:      metricsutil.HelpMsgWithStability("Latency of a single KV-cache metrics scrape, including failures.", compbasemetrics.ALPHA),
+			Buckets:   []float64{0.01, 0.05, 0.1, 0.25, 0.5, 1, 2, 5},
+		},
+		[]string{"model"},
+	)
+
+	kvCacheScrapeFailures = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Subsystem: component,
+			Name:      "kv_cache_scrape_failures_total",
+			Help:      metricsutil.HelpMsgWithStability("Number of failed KV-cache metrics scrapes by reason.", compbasemetrics.ALPHA),
+		},
+		[]string{"model", "reason"},
+	)
+
+	kvCacheUtilization = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Subsystem: component,
+			Name:      "kv_cache_utilization_ratio",
+			Help:      metricsutil.HelpMsgWithStability("Last observed pool-wide KV-cache utilization per model (0.0-1.0).", compbasemetrics.ALPHA),
+		},
+		[]string{"model"},
+	)
 )
 
 var registerMetrics sync.Once
@@ -147,6 +181,9 @@ func Register(customCollectors ...prometheus.Collector) {
 		metrics.Registry.MustRegister(requestTTFT)
 		metrics.Registry.MustRegister(modelAvgTTFT)
 		metrics.Registry.MustRegister(modelAvgTPOT)
+		metrics.Registry.MustRegister(kvCacheScrapeDuration)
+		metrics.Registry.MustRegister(kvCacheScrapeFailures)
+		metrics.Registry.MustRegister(kvCacheUtilization)
 		for _, collector := range customCollectors {
 			metrics.Registry.MustRegister(collector)
 		}
@@ -205,4 +242,26 @@ func RecordModelSelectorAttempt(err error) {
 		return
 	}
 	modelSelectorAttemptTotal.WithLabelValues("success").Inc()
+}
+
+// RecordKVCacheScrapeDuration records the wall-clock time taken by one
+// KV-cache scrape. Recorded for both successes and failures so operators can
+// see how long timeouts actually take to surface.
+func RecordKVCacheScrapeDuration(model string, duration time.Duration) {
+	kvCacheScrapeDuration.WithLabelValues(model).Observe(duration.Seconds())
+}
+
+// RecordKVCacheScrapeFailure records one failed KV-cache scrape. The reason
+// label is a short, low-cardinality token like "timeout", "dial", "http_status",
+// or "parse"; do not include free-form error text.
+func RecordKVCacheScrapeFailure(model, reason string) {
+	kvCacheScrapeFailures.WithLabelValues(model, reason).Inc()
+}
+
+// RecordKVCacheUtilization mirrors the most recently observed pool-wide
+// utilization for a model. Only called on a successful scrape; failures leave
+// the gauge at its last value so alerts can still see "stale" data, with the
+// freshness signal coming from kv_cache_scrape_failures_total.
+func RecordKVCacheUtilization(model string, value float64) {
+	kvCacheUtilization.WithLabelValues(model).Set(value)
 }

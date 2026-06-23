@@ -28,6 +28,7 @@ import (
 
 	"github.com/llm-d/llm-d-inference-payload-processor/pkg/datastore"
 	"github.com/llm-d/llm-d-inference-payload-processor/pkg/framework/interface/datalayer"
+	"github.com/llm-d/llm-d-inference-payload-processor/pkg/framework/interface/datalayer/metricsendpoint"
 	"github.com/llm-d/llm-d-inference-payload-processor/pkg/framework/interface/datalayer/pricing"
 	"github.com/llm-d/llm-d-inference-payload-processor/pkg/framework/interface/plugin"
 )
@@ -487,6 +488,244 @@ func floatCloseEnough(a, b float64) bool {
 		diff = -diff
 	}
 	return diff < priceFloatEpsilon
+}
+
+// --- MetricsURL tests ---
+//
+// These verify that the optional metricsURL field on a ModelConfiguration is
+// translated to a metricsendpoint.MetricsEndpoint attribute on the Model and
+// that the attribute's lifecycle correctly tracks the config file: present →
+// attached, absent → detached, invalid → treated as absent.
+
+// metricsURLTestModel is the model name shared by the metrics-URL tests below.
+const metricsURLTestModel = "mu1"
+
+// readMetricsEndpoint fetches the MetricsEndpoint attribute, returning
+// (endpoint, true) when present and (zero, false) when absent. It fails the
+// test if the attribute is present but of the wrong type.
+func readMetricsEndpoint(t *testing.T, ds datalayer.Datastore, model string) (metricsendpoint.MetricsEndpoint, bool) {
+	t.Helper()
+	v, ok := ds.GetOrCreateModel(model).GetAttributes().Get(metricsendpoint.AttributeKey)
+	if !ok {
+		return metricsendpoint.MetricsEndpoint{}, false
+	}
+	ep, ok := v.(metricsendpoint.MetricsEndpoint)
+	if !ok {
+		t.Fatalf("model %q: attribute %q is %T, want metricsendpoint.MetricsEndpoint",
+			model, metricsendpoint.AttributeKey, v)
+	}
+	return ep, true
+}
+
+// waitForMetricsEndpoint polls until the MetricsEndpoint on model matches want
+// (or want=="" to mean "attribute absent"). Returns the last observed URL
+// (empty string when the attribute was never observed).
+func waitForMetricsEndpoint(t *testing.T, ds datalayer.Datastore, model, want string, timeout time.Duration) string {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	var last string
+	for time.Now().Before(deadline) {
+		ep, ok := readMetricsEndpoint(t, ds, model)
+		switch {
+		case !ok && want == "":
+			return ""
+		case ok:
+			last = ep.URL
+			if ep.URL == want {
+				return ep.URL
+			}
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	return last
+}
+
+// TestStart_PopulatesMetricsEndpoint verifies that a valid metricsURL on a
+// model entry produces a MetricsEndpoint attribute carrying the same URL.
+func TestStart_PopulatesMetricsEndpoint(t *testing.T) {
+	ds := datastore.NewFakeDataStore()
+	path := writeTempModelsConfig(t, ModelsConfig{
+		Models: []ModelConfiguration{{
+			Name:       metricsURLTestModel,
+			MetricsURL: "http://llama-pool.svc:8000/metrics",
+		}},
+	})
+	c := useFactory(t, path, ds)
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(func() { cancel(); c.Stop() })
+
+	if err := c.Start(ctx); err != nil {
+		t.Fatalf("Start failed: %v", err)
+	}
+
+	ep, ok := readMetricsEndpoint(t, ds, metricsURLTestModel)
+	if !ok {
+		t.Fatalf("expected MetricsEndpoint attribute to be present")
+	}
+	if ep.URL != "http://llama-pool.svc:8000/metrics" {
+		t.Errorf("MetricsEndpoint.URL = %q, want %q", ep.URL, "http://llama-pool.svc:8000/metrics")
+	}
+}
+
+// TestStart_OmittedMetricsURL_NoAttribute verifies that omitting metricsURL
+// leaves the MetricsEndpoint attribute unset. This is the contract that
+// downstream consumers (kv-cache-collector) rely on to skip a model that the
+// operator did not configure for scraping.
+func TestStart_OmittedMetricsURL_NoAttribute(t *testing.T) {
+	ds := datastore.NewFakeDataStore()
+	path := writeTempModelsConfig(t, ModelsConfig{
+		Models: []ModelConfiguration{{Name: metricsURLTestModel}},
+	})
+	c := useFactory(t, path, ds)
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(func() { cancel(); c.Stop() })
+
+	if err := c.Start(ctx); err != nil {
+		t.Fatalf("Start failed: %v", err)
+	}
+
+	if _, ok := readMetricsEndpoint(t, ds, metricsURLTestModel); ok {
+		t.Errorf("expected MetricsEndpoint attribute to be absent when metricsURL is omitted")
+	}
+}
+
+// TestStart_InvalidMetricsURL_IgnoredButModelRegistered verifies that a
+// syntactically invalid metricsURL is treated as absent: the model is still
+// registered (so other plugins like pricing-aware ones can operate on it), but
+// no MetricsEndpoint attribute is attached.
+func TestStart_InvalidMetricsURL_IgnoredButModelRegistered(t *testing.T) {
+	cases := []struct {
+		name string
+		url  string
+	}{
+		{"not_a_url", "not-a-url"},
+		{"wrong_scheme", "ftp://example.com/metrics"},
+		{"missing_host", "http:///metrics"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			ds := datastore.NewFakeDataStore()
+			path := writeTempModelsConfig(t, ModelsConfig{
+				Models: []ModelConfiguration{{
+					Name:       metricsURLTestModel,
+					MetricsURL: tc.url,
+				}},
+			})
+			c := useFactory(t, path, ds)
+			ctx, cancel := context.WithCancel(context.Background())
+			t.Cleanup(func() { cancel(); c.Stop() })
+
+			if err := c.Start(ctx); err != nil {
+				t.Fatalf("Start failed: %v", err)
+			}
+
+			models := ds.Models()
+			if len(models) != 1 || models[0] != metricsURLTestModel {
+				t.Fatalf("expected model %q to be registered despite invalid URL, got %v",
+					metricsURLTestModel, models)
+			}
+			if _, ok := readMetricsEndpoint(t, ds, metricsURLTestModel); ok {
+				t.Errorf("expected MetricsEndpoint attribute to be absent for invalid URL %q", tc.url)
+			}
+		})
+	}
+}
+
+// TestStart_FileChange_AddsMetricsURL verifies that editing the config file to
+// add a metricsURL is picked up by the watcher and produces the attribute.
+func TestStart_FileChange_AddsMetricsURL(t *testing.T) {
+	ds := datastore.NewFakeDataStore()
+	path := writeTempModelsConfig(t, ModelsConfig{
+		Models: []ModelConfiguration{{Name: metricsURLTestModel}},
+	})
+	c := useFactory(t, path, ds)
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(func() { cancel(); c.Stop() })
+
+	if err := c.Start(ctx); err != nil {
+		t.Fatalf("Start failed: %v", err)
+	}
+
+	overwriteFile(t, path, ModelsConfig{
+		Models: []ModelConfiguration{{
+			Name:       metricsURLTestModel,
+			MetricsURL: "http://added.svc:8000/metrics",
+		}},
+	})
+
+	got := waitForMetricsEndpoint(t, ds, metricsURLTestModel,
+		"http://added.svc:8000/metrics", 2*time.Second)
+	if got != "http://added.svc:8000/metrics" {
+		t.Errorf("MetricsEndpoint.URL after add = %q, want %q",
+			got, "http://added.svc:8000/metrics")
+	}
+}
+
+// TestStart_FileChange_RemovesMetricsURL verifies that clearing the metricsURL
+// field on a reload removes the previously attached attribute, so consumers do
+// not keep polling a URL the operator has retracted.
+func TestStart_FileChange_RemovesMetricsURL(t *testing.T) {
+	ds := datastore.NewFakeDataStore()
+	path := writeTempModelsConfig(t, ModelsConfig{
+		Models: []ModelConfiguration{{
+			Name:       metricsURLTestModel,
+			MetricsURL: "http://will-be-removed.svc:8000/metrics",
+		}},
+	})
+	c := useFactory(t, path, ds)
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(func() { cancel(); c.Stop() })
+
+	if err := c.Start(ctx); err != nil {
+		t.Fatalf("Start failed: %v", err)
+	}
+
+	if _, ok := readMetricsEndpoint(t, ds, metricsURLTestModel); !ok {
+		t.Fatalf("expected MetricsEndpoint attribute to be present before file change")
+	}
+
+	overwriteFile(t, path, ModelsConfig{
+		Models: []ModelConfiguration{{Name: metricsURLTestModel}},
+	})
+
+	got := waitForMetricsEndpoint(t, ds, metricsURLTestModel, "", 2*time.Second)
+	if got != "" {
+		t.Errorf("expected MetricsEndpoint attribute to be removed after URL cleared, still saw %q", got)
+	}
+}
+
+// TestStart_FileChange_UpdatesMetricsURL verifies that editing metricsURL in
+// the config file overwrites the stored attribute. This is what keeps the
+// next poll targeting the new URL.
+func TestStart_FileChange_UpdatesMetricsURL(t *testing.T) {
+	ds := datastore.NewFakeDataStore()
+	path := writeTempModelsConfig(t, ModelsConfig{
+		Models: []ModelConfiguration{{
+			Name:       metricsURLTestModel,
+			MetricsURL: "http://old.svc:8000/metrics",
+		}},
+	})
+	c := useFactory(t, path, ds)
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(func() { cancel(); c.Stop() })
+
+	if err := c.Start(ctx); err != nil {
+		t.Fatalf("Start failed: %v", err)
+	}
+
+	overwriteFile(t, path, ModelsConfig{
+		Models: []ModelConfiguration{{
+			Name:       metricsURLTestModel,
+			MetricsURL: "http://new.svc:8000/metrics",
+		}},
+	})
+
+	got := waitForMetricsEndpoint(t, ds, metricsURLTestModel,
+		"http://new.svc:8000/metrics", 2*time.Second)
+	if got != "http://new.svc:8000/metrics" {
+		t.Errorf("MetricsEndpoint.URL after update = %q, want %q",
+			got, "http://new.svc:8000/metrics")
+	}
 }
 
 // TestStop_CleanShutdown verifies that Stop returns within a reasonable timeout and
